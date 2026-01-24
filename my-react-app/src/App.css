@@ -71,9 +71,12 @@ body {
 }
 
 @keyframes pulse {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.7;
   }
@@ -121,9 +124,12 @@ body {
 }
 
 @keyframes blink {
-  0%, 100% {
+
+  0%,
+  100% {
     opacity: 1;
   }
+
   50% {
     opacity: 0.3;
   }
@@ -185,6 +191,7 @@ body {
     opacity: 0;
     transform: translateY(10px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -383,6 +390,18 @@ body {
 .model-selector {
   display: flex;
   gap: 1rem;
+}
+
+/* Selectors Row */
+.selectors-row {
+  display: flex;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.na-value {
+  color: var(--text-muted);
+  font-style: italic;
 }
 
 .model-select {

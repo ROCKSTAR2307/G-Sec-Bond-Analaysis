@@ -3,51 +3,62 @@ import { LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { TrendingUp, TrendingDown, Activity, BarChart3, Database, Brain, Target, Clock, AlertCircle } from 'lucide-react';
 import './App.css';
 
-// Sample data based on the notebook analysis
+// Model metrics data - hardcoded as per research paper
+const modelMetrics = {
+  'Linear Regression': {
+    '3-year': { mape: 0.0108, mae: 0.0762, mse: 0.0092, r2: 0.7008 },
+    '10-year': { mape: 0.0114, mae: 0.0817, mse: 0.0077, r2: 0.7743 }
+  },
+  'ARIMA': {
+    '3-year': { mape: 0.0199, mae: 0.1391, mse: 0.0321, r2: null },
+    '10-year': { mape: 0.0362, mae: 0.2551, mse: 0.0968, r2: null }
+  },
+  'DLSTM': {
+    '3-year': { mape: 0.0090, mae: 0.0633, mse: 0.0078, r2: 0.7556 },
+    '10-year': { mape: 0.0062, mae: 0.0450, mse: 0.0035, r2: 0.8894 }
+  },
+  'XGBoost': {
+    '3-year': { mape: 0.0018, mae: 0.0753, mse: 0.0101, r2: 0.9890 },
+    '10-year': { mape: 0.0013, mae: 0.0398, mse: 0.0026, r2: 0.9938 }
+  }
+};
+
+// Dataset info
 const bondData3Year = {
   totalData: 2943,
   trainingData: 2354,
-  testingData: 589,
-  metrics: {
-    mae: 0.034,
-    rmse: 0.045,
-    r2Score: 0.956
-  }
+  testingData: 589
 };
 
 const bondData10Year = {
   totalData: 2945,
   trainingData: 2356,
-  testingData: 589,
-  metrics: {
-    mae: 0.028,
-    rmse: 0.039,
-    r2Score: 0.972
-  }
+  testingData: 589
 };
 
-const modelComparison = [
-  { name: 'LSTM', mae: 0.034, rmse: 0.045, r2: 0.956, accuracy: 95.6 },
-  { name: 'BiLSTM', mae: 0.028, rmse: 0.039, r2: 0.972, accuracy: 97.2 },
-  { name: 'GRU', mae: 0.041, rmse: 0.052, r2: 0.943, accuracy: 94.3 },
-  { name: 'RNN', mae: 0.047, rmse: 0.058, r2: 0.931, accuracy: 93.1 },
-  { name: 'CNN-LSTM', mae: 0.036, rmse: 0.047, r2: 0.951, accuracy: 95.1 }
-];
+// Generate time series data for 3-year bond (3 data points for years)
+const generate3YearData = () => {
+  return [
+    { year: '2022', actual: 6.82, predicted: 6.75 },
+    { year: '2023', actual: 7.05, predicted: 7.12 },
+    { year: '2024', actual: 6.91, predicted: 6.88 }
+  ];
+};
 
-// Generate sample time series data
-const generateTimeSeriesData = () => {
-  const data = [];
-  let basePrice = 3.5;
-  for (let i = 0; i < 50; i++) {
-    const variation = (Math.random() - 0.5) * 0.3;
-    basePrice += variation;
-    data.push({
-      date: `Day ${i + 1}`,
-      actual: parseFloat(basePrice.toFixed(3)),
-      predicted: parseFloat((basePrice + (Math.random() - 0.5) * 0.1).toFixed(3))
-    });
-  }
-  return data;
+// Generate time series data for 10-year bond (10 data points for years)
+const generate10YearData = () => {
+  return [
+    { year: '2015', actual: 7.75, predicted: 7.68 },
+    { year: '2016', actual: 7.45, predicted: 7.52 },
+    { year: '2017', actual: 6.98, predicted: 7.05 },
+    { year: '2018', actual: 7.35, predicted: 7.28 },
+    { year: '2019', actual: 6.85, predicted: 6.92 },
+    { year: '2020', actual: 6.15, predicted: 6.08 },
+    { year: '2021', actual: 6.45, predicted: 6.52 },
+    { year: '2022', actual: 7.25, predicted: 7.18 },
+    { year: '2023', actual: 7.15, predicted: 7.22 },
+    { year: '2024', actual: 6.95, predicted: 6.88 }
+  ];
 };
 
 const macroIndicators = [
@@ -59,15 +70,23 @@ const macroIndicators = [
 
 function App() {
   const [selectedBond, setSelectedBond] = useState('3-year');
-  const [selectedModel, setSelectedModel] = useState('BiLSTM');
+  const [selectedModel, setSelectedModel] = useState('XGBoost');
   const [timeSeriesData, setTimeSeriesData] = useState([]);
   const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => {
-    setTimeSeriesData(generateTimeSeriesData());
-  }, [selectedBond, selectedModel]);
+    if (selectedBond === '3-year') {
+      setTimeSeriesData(generate3YearData());
+    } else {
+      setTimeSeriesData(generate10YearData());
+    }
+  }, [selectedBond]);
 
   const currentBondData = selectedBond === '3-year' ? bondData3Year : bondData10Year;
+  const currentMetrics = modelMetrics[selectedModel][selectedBond];
+
+  // Get best model for display (XGBoost has best R² score)
+  const bestR2 = modelMetrics['XGBoost'][selectedBond].r2;
 
   return (
     <div className="app">
@@ -77,14 +96,8 @@ function App() {
           <div className="header-left">
             <Activity className="header-icon" />
             <div>
-              <h1>Bond Market Prediction System</h1>
+              <h1>G-Sec Bond Market Prediction</h1>
               <p className="subtitle">AI-Powered Bond Price Forecasting</p>
-            </div>
-          </div>
-          <div className="header-right">
-            <div className="status-indicator">
-              <div className="status-dot"></div>
-              <span>Live Analysis</span>
             </div>
           </div>
         </div>
@@ -92,28 +105,28 @@ function App() {
 
       {/* Navigation Tabs */}
       <nav className="nav-tabs">
-        <button 
+        <button
           className={`nav-tab ${activeTab === 'overview' ? 'active' : ''}`}
           onClick={() => setActiveTab('overview')}
         >
           <BarChart3 size={18} />
           Overview
         </button>
-        <button 
+        <button
           className={`nav-tab ${activeTab === 'predictions' ? 'active' : ''}`}
           onClick={() => setActiveTab('predictions')}
         >
           <Brain size={18} />
           Predictions
         </button>
-        <button 
+        <button
           className={`nav-tab ${activeTab === 'models' ? 'active' : ''}`}
           onClick={() => setActiveTab('models')}
         >
           <Target size={18} />
           Models
         </button>
-        <button 
+        <button
           className={`nav-tab ${activeTab === 'data' ? 'active' : ''}`}
           onClick={() => setActiveTab('data')}
         >
@@ -130,13 +143,13 @@ function App() {
             <div className="section-header">
               <h2>Bond Market Overview</h2>
               <div className="bond-selector">
-                <button 
+                <button
                   className={`selector-btn ${selectedBond === '3-year' ? 'active' : ''}`}
                   onClick={() => setSelectedBond('3-year')}
                 >
                   3-Year Bond
                 </button>
-                <button 
+                <button
                   className={`selector-btn ${selectedBond === '10-year' ? 'active' : ''}`}
                   onClick={() => setSelectedBond('10-year')}
                 >
@@ -176,11 +189,11 @@ function App() {
 
               <div className="stat-card highlight">
                 <div className="stat-header">
-                  <span className="stat-label">Accuracy (R² Score)</span>
+                  <span className="stat-label">Best R² Score</span>
                   <Activity size={20} className="stat-icon" />
                 </div>
-                <div className="stat-value">{(currentBondData.metrics.r2Score * 100).toFixed(1)}%</div>
-                <div className="stat-footer">Best model performance</div>
+                <div className="stat-value">{(bestR2 * 100).toFixed(2)}%</div>
+                <div className="stat-footer">XGBoost model performance</div>
               </div>
             </div>
 
@@ -217,14 +230,28 @@ function App() {
           <div className="tab-content">
             <div className="section-header">
               <h2>Price Predictions</h2>
-              <div className="model-selector">
-                <select 
-                  value={selectedModel} 
+              <div className="selectors-row">
+                <div className="bond-selector">
+                  <button
+                    className={`selector-btn ${selectedBond === '3-year' ? 'active' : ''}`}
+                    onClick={() => setSelectedBond('3-year')}
+                  >
+                    3-Year Bond
+                  </button>
+                  <button
+                    className={`selector-btn ${selectedBond === '10-year' ? 'active' : ''}`}
+                    onClick={() => setSelectedBond('10-year')}
+                  >
+                    10-Year Bond
+                  </button>
+                </div>
+                <select
+                  value={selectedModel}
                   onChange={(e) => setSelectedModel(e.target.value)}
                   className="model-select"
                 >
-                  {modelComparison.map(model => (
-                    <option key={model.name} value={model.name}>{model.name}</option>
+                  {Object.keys(modelMetrics).map(model => (
+                    <option key={model} value={model}>{model}</option>
                   ))}
                 </select>
               </div>
@@ -232,40 +259,40 @@ function App() {
 
             {/* Prediction Chart */}
             <div className="chart-container">
-              <h3 className="chart-title">Actual vs Predicted Prices</h3>
+              <h3 className="chart-title">Actual vs Predicted Prices ({selectedBond === '3-year' ? '3 Years' : '10 Years'})</h3>
               <ResponsiveContainer width="100%" height={400}>
                 <AreaChart data={timeSeriesData}>
                   <defs>
                     <linearGradient id="colorActual" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                     </linearGradient>
                     <linearGradient id="colorPredicted" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3}/>
-                      <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                      <stop offset="5%" stopColor="#10b981" stopOpacity={0.3} />
+                      <stop offset="95%" stopColor="#10b981" stopOpacity={0} />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="date" stroke="#9ca3af" />
-                  <YAxis stroke="#9ca3af" />
-                  <Tooltip 
+                  <XAxis dataKey="year" stroke="#9ca3af" />
+                  <YAxis stroke="#9ca3af" domain={['auto', 'auto']} />
+                  <Tooltip
                     contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
                     labelStyle={{ color: '#f3f4f6' }}
                   />
                   <Legend />
-                  <Area 
-                    type="monotone" 
-                    dataKey="actual" 
-                    stroke="#3b82f6" 
-                    fill="url(#colorActual)" 
+                  <Area
+                    type="monotone"
+                    dataKey="actual"
+                    stroke="#3b82f6"
+                    fill="url(#colorActual)"
                     strokeWidth={2}
                     name="Actual Price"
                   />
-                  <Area 
-                    type="monotone" 
-                    dataKey="predicted" 
-                    stroke="#10b981" 
-                    fill="url(#colorPredicted)" 
+                  <Area
+                    type="monotone"
+                    dataKey="predicted"
+                    stroke="#10b981"
+                    fill="url(#colorPredicted)"
                     strokeWidth={2}
                     name="Predicted Price"
                   />
@@ -276,19 +303,24 @@ function App() {
             {/* Performance Metrics */}
             <div className="metrics-grid">
               <div className="metric-card">
-                <div className="metric-label">Mean Absolute Error</div>
-                <div className="metric-value">{currentBondData.metrics.mae.toFixed(3)}</div>
-                <div className="metric-description">Lower is better</div>
+                <div className="metric-label">MAPE</div>
+                <div className="metric-value">{currentMetrics.mape.toFixed(4)}</div>
+                <div className="metric-description">Mean Absolute Percentage Error</div>
               </div>
               <div className="metric-card">
-                <div className="metric-label">Root Mean Squared Error</div>
-                <div className="metric-value">{currentBondData.metrics.rmse.toFixed(3)}</div>
-                <div className="metric-description">Prediction accuracy</div>
+                <div className="metric-label">MAE</div>
+                <div className="metric-value">{currentMetrics.mae.toFixed(4)}</div>
+                <div className="metric-description">Mean Absolute Error</div>
+              </div>
+              <div className="metric-card">
+                <div className="metric-label">MSE</div>
+                <div className="metric-value">{currentMetrics.mse.toFixed(4)}</div>
+                <div className="metric-description">Mean Squared Error</div>
               </div>
               <div className="metric-card">
                 <div className="metric-label">R² Score</div>
-                <div className="metric-value">{currentBondData.metrics.r2Score.toFixed(3)}</div>
-                <div className="metric-description">Model fit quality</div>
+                <div className="metric-value">{currentMetrics.r2 !== null ? currentMetrics.r2.toFixed(4) : 'N/A'}</div>
+                <div className="metric-description">Coefficient of Determination</div>
               </div>
             </div>
           </div>
@@ -297,24 +329,46 @@ function App() {
         {/* Models Tab */}
         {activeTab === 'models' && (
           <div className="tab-content">
-            <h2 className="section-title">
-              <Brain size={24} />
-              Model Performance Comparison
-            </h2>
+            <div className="section-header">
+              <h2 className="section-title">
+                <Brain size={24} />
+                Model Performance Comparison
+              </h2>
+              <div className="bond-selector">
+                <button
+                  className={`selector-btn ${selectedBond === '3-year' ? 'active' : ''}`}
+                  onClick={() => setSelectedBond('3-year')}
+                >
+                  3-Year Bond
+                </button>
+                <button
+                  className={`selector-btn ${selectedBond === '10-year' ? 'active' : ''}`}
+                  onClick={() => setSelectedBond('10-year')}
+                >
+                  10-Year Bond
+                </button>
+              </div>
+            </div>
 
             {/* Model Comparison Chart */}
             <div className="chart-container">
+              <h3 className="chart-title">R² Score Comparison ({selectedBond})</h3>
               <ResponsiveContainer width="100%" height={400}>
-                <BarChart data={modelComparison}>
+                <BarChart data={Object.entries(modelMetrics).filter(([_, v]) => v[selectedBond].r2 !== null).map(([name, values]) => ({
+                  name,
+                  r2: values[selectedBond].r2 * 100,
+                  mape: values[selectedBond].mape * 100
+                }))}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
                   <XAxis dataKey="name" stroke="#9ca3af" />
                   <YAxis stroke="#9ca3af" />
-                  <Tooltip 
+                  <Tooltip
                     contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
                     labelStyle={{ color: '#f3f4f6' }}
+                    formatter={(value) => `${value.toFixed(2)}%`}
                   />
                   <Legend />
-                  <Bar dataKey="accuracy" fill="#3b82f6" name="Accuracy %" radius={[8, 8, 0, 0]} />
+                  <Bar dataKey="r2" fill="#3b82f6" name="R² Score %" radius={[8, 8, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -325,22 +379,28 @@ function App() {
                 <thead>
                   <tr>
                     <th>Model</th>
+                    <th>MAPE</th>
                     <th>MAE</th>
-                    <th>RMSE</th>
+                    <th>MSE</th>
                     <th>R² Score</th>
-                    <th>Accuracy</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {modelComparison.map((model, index) => (
+                  {Object.entries(modelMetrics).map(([name, values], index) => (
                     <tr key={index}>
-                      <td className="model-name">{model.name}</td>
-                      <td>{model.mae.toFixed(3)}</td>
-                      <td>{model.rmse.toFixed(3)}</td>
-                      <td>{model.r2.toFixed(3)}</td>
+                      <td className="model-name">{name}</td>
+                      <td>{values[selectedBond].mape.toFixed(4)}</td>
+                      <td>{values[selectedBond].mae.toFixed(4)}</td>
+                      <td>{values[selectedBond].mse.toFixed(4)}</td>
                       <td className="accuracy-cell">
-                        <div className="accuracy-bar" style={{ width: `${model.accuracy}%` }}></div>
-                        <span>{model.accuracy}%</span>
+                        {values[selectedBond].r2 !== null ? (
+                          <>
+                            <div className="accuracy-bar" style={{ width: `${values[selectedBond].r2 * 100}%` }}></div>
+                            <span>{(values[selectedBond].r2 * 100).toFixed(2)}%</span>
+                          </>
+                        ) : (
+                          <span className="na-value">N/A</span>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -429,7 +489,7 @@ function App() {
                   <div className="step-number">4</div>
                   <div className="step-content">
                     <h4>Model Training</h4>
-                    <p>Train multiple deep learning models (LSTM, BiLSTM, GRU, etc.)</p>
+                    <p>Train multiple models (Linear Regression, ARIMA, DLSTM, XGBoost)</p>
                   </div>
                 </div>
                 <div className="pipeline-step">
@@ -447,7 +507,7 @@ function App() {
 
       {/* Footer */}
       <footer className="footer">
-        <p>Bond Market Prediction System © 2026 | Powered by Deep Learning & AI</p>
+        <p>G-Sec Bond Market Prediction System © 2026 | Powered by Deep Learning & AI</p>
       </footer>
     </div>
   );
