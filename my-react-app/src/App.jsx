@@ -679,7 +679,7 @@ function ModelCardsSection() {
 // ─── Per-model prediction card ────────────────────────────────────────────────
 
 
-function ModelPredictionCard({ modelName }) {
+function ModelPredictionCard({ modelName, onTrainingChange }) {
   const [bondType, setBondType] = useState('3-year');
   const [isLoading, setIsLoading] = useState(false);
   const [chartData, setChartData] = useState([]);
@@ -702,6 +702,7 @@ function ModelPredictionCard({ modelName }) {
     setError(null);
     setMetrics(null);
     setComputed(false);
+    onTrainingChange?.(modelName);          // ← tell header we're training
     const startTime = Date.now();
     try {
       const result = await bondAPI.compute(bondType, modelName);
@@ -710,11 +711,16 @@ function ModelPredictionCard({ modelName }) {
       const elapsed = Date.now() - startTime;
       if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
 
-      const formatted = result.chart_data.dates.map((dateStr, i) => ({
-        year: new Date(dateStr).getFullYear().toString(),
-        Actual: result.chart_data.actual[i],
-        Predicted: result.chart_data.predicted[i],
-      }));
+      const formatted = result.chart_data.dates.map((dateStr, i) => {
+        const d = new Date(dateStr);
+        const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+        return {
+          date: label,
+          year: d.getFullYear().toString(),
+          Actual: result.chart_data.actual[i],
+          Predicted: result.chart_data.predicted[i],
+        };
+      });
       setChartData(formatted);
       setMetrics(result.metrics);
       setComputed(true);
@@ -722,10 +728,12 @@ function ModelPredictionCard({ modelName }) {
       setError(err.message);
     } finally {
       setIsLoading(false);
+      onTrainingChange?.(null);             // ← training done, back to idle
     }
   };
 
-  const uniqueYears = [...new Set(chartData.map(d => d.year))];
+
+
 
   return (
     <div style={{
@@ -763,13 +771,15 @@ function ModelPredictionCard({ modelName }) {
             background: '#0f172a', borderRadius: '10px', border: '1px solid #334155',
           }}>
             {['3-year', '10-year'].map(b => (
-              <button key={b} onClick={() => handleBondChange(b)} style={{
+              <button key={b} onClick={() => !isLoading && handleBondChange(b)} style={{
                 padding: '5px 18px',
                 background: bondType === b ? accentColor : 'transparent',
-                color: bondType === b ? '#0f172a' : '#94a3b8',
+                color: bondType === b ? '#0f172a' : isLoading ? '#334155' : '#94a3b8',
                 border: 'none', borderRadius: '7px',
-                cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
+                fontWeight: 700, fontSize: '0.8rem',
                 transition: 'all 0.25s ease', whiteSpace: 'nowrap',
+                opacity: isLoading && bondType !== b ? 0.35 : 1,
               }}>
                 {b === '3-year' ? '3-Year' : '10-Year'}
               </button>
@@ -791,9 +801,18 @@ function ModelPredictionCard({ modelName }) {
           boxShadow: isLoading ? 'none' : `0 4px 20px ${accentColor}44`,
           whiteSpace: 'nowrap',
         }}>
-          {isLoading
-            ? <><span style={{ display: 'inline-block', animation: 'spin 0.8s linear infinite' }}>⟳</span> Computing…</>
-            : '⚡ Live Compute'}
+          {isLoading ? (
+            <>
+              <span style={{
+                width: 14, height: 14, borderRadius: '50%', flexShrink: 0,
+                border: '2px solid rgba(255,255,255,0.15)',
+                borderTopColor: '#fff',
+                display: 'inline-block',
+                animation: 'spin 0.7s linear infinite',
+              }} />
+              Computing…
+            </>
+          ) : '⚡ Live Compute'}
         </button>
       </div>
 
@@ -819,10 +838,17 @@ function ModelPredictionCard({ modelName }) {
             <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
               <XAxis
-                dataKey="year" stroke="#334155"
-                ticks={uniqueYears} interval={0}
-                tick={{ fontSize: 12, fill: '#64748b' }}
-                axisLine={{ stroke: '#334155' }} tickLine={false}
+                dataKey="date"
+                stroke="#334155"
+                tickLine={false}
+                axisLine={{ stroke: '#334155' }}
+                tick={{ fontSize: 11, fill: '#64748b' }}
+                interval={Math.floor(chartData.length / 6)}
+                tickFormatter={(val) => {
+                  // show only the year part of the date string
+                  const parts = val.split(' ');
+                  return parts[2] || val;
+                }}
               />
               <YAxis
                 stroke="#334155" domain={['auto', 'auto']}
@@ -832,24 +858,62 @@ function ModelPredictionCard({ modelName }) {
                 width={52}
               />
               <Tooltip
-                contentStyle={{
-                  backgroundColor: '#0f172a',
-                  border: `1px solid ${accentColor}66`,
-                  borderRadius: '10px',
-                  padding: '10px 14px',
-                  boxShadow: '0 8px 24px rgba(0,0,0,0.5)',
+                cursor={{ stroke: 'rgba(148,163,184,0.15)', strokeWidth: 1, strokeDasharray: '4 3' }}
+                content={({ active, payload, label }) => {
+                  if (!active || !payload?.length) return null;
+                  const d = payload[0]?.payload || {};
+                  const actual = payload.find(p => p.dataKey === 'Actual');
+                  const predicted = payload.find(p => p.dataKey === 'Predicted');
+                  return (
+                    <div style={{
+                      background: 'linear-gradient(160deg,#0f1f35,#0b1424)',
+                      border: `1px solid ${accentColor}55`,
+                      borderRadius: 14, padding: '14px 18px',
+                      boxShadow: `0 16px 48px rgba(0,0,0,0.6), 0 0 0 1px ${accentColor}18`,
+                      minWidth: 200,
+                    }}>
+                      {/* Date header */}
+                      <div style={{
+                        fontSize: '0.72rem', fontWeight: 700, color: '#64748b',
+                        textTransform: 'uppercase', letterSpacing: '0.08em',
+                        marginBottom: 10, paddingBottom: 8,
+                        borderBottom: '1px solid rgba(255,255,255,0.06)',
+                      }}>📅 {d.date}</div>
+                      {/* Values */}
+                      {actual && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24, marginBottom: 6 }}>
+                          <span style={{ fontSize: '0.75rem', color: ACTUAL_LINE_COLOR, fontWeight: 600 }}>Actual</span>
+                          <span style={{ fontSize: '0.88rem', fontWeight: 800, color: ACTUAL_LINE_COLOR, fontVariantNumeric: 'tabular-nums' }}>
+                            {Number(actual.value).toFixed(5)}
+                          </span>
+                        </div>
+                      )}
+                      {predicted && (
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+                          <span style={{ fontSize: '0.75rem', color: accentColor, fontWeight: 600 }}>Predicted</span>
+                          <span style={{ fontSize: '0.88rem', fontWeight: 800, color: accentColor, fontVariantNumeric: 'tabular-nums' }}>
+                            {Number(predicted.value).toFixed(5)}
+                          </span>
+                        </div>
+                      )}
+                      {/* Error */}
+                      {actual && predicted && (
+                        <div style={{
+                          marginTop: 10, paddingTop: 8, borderTop: '1px solid rgba(255,255,255,0.05)',
+                          display: 'flex', justifyContent: 'space-between',
+                        }}>
+                          <span style={{ fontSize: '0.68rem', color: '#475569', fontWeight: 600 }}>Error</span>
+                          <span style={{
+                            fontSize: '0.72rem', fontWeight: 700,
+                            color: Math.abs(actual.value - predicted.value) < 0.05 ? '#4ade80' : '#fbbf24',
+                          }}>
+                            {Math.abs(actual.value - predicted.value).toFixed(5)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  );
                 }}
-                labelStyle={{ color: '#94a3b8', fontSize: '0.75rem', fontWeight: 600, marginBottom: '4px' }}
-                itemStyle={{ fontSize: '0.85rem', padding: '2px 0' }}
-                formatter={(value, name) => [
-                  <span key={name} style={{
-                    fontWeight: 700,
-                    color: name === 'Actual' ? ACTUAL_LINE_COLOR : accentColor,
-                  }}>
-                    {Number(value).toFixed(4)}
-                  </span>,
-                  name,
-                ]}
               />
               <Legend
                 wrapperStyle={{ paddingTop: '10px', fontSize: '0.82rem' }}
@@ -863,14 +927,24 @@ function ModelPredictionCard({ modelName }) {
               {/* Actual — near-white, solid */}
               <Line
                 type="monotone" dataKey="Actual" name="Actual"
-                stroke={ACTUAL_LINE_COLOR} strokeWidth={2}
-                dot={false} activeDot={{ r: 4, fill: ACTUAL_LINE_COLOR, strokeWidth: 0 }}
+                stroke={ACTUAL_LINE_COLOR} strokeWidth={1.5}
+                dot={false}
+                activeDot={{
+                  r: 6, fill: ACTUAL_LINE_COLOR, strokeWidth: 2.5,
+                  stroke: 'rgba(255,255,255,0.25)',
+                  filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.6))',
+                }}
               />
               {/* Predicted — model accent, dashed */}
               <Line
                 type="monotone" dataKey="Predicted" name="Predicted"
-                stroke={accentColor} strokeWidth={2} strokeDasharray="6 3"
-                dot={false} activeDot={{ r: 4, fill: accentColor, strokeWidth: 0 }}
+                stroke={accentColor} strokeWidth={1.5} strokeDasharray="6 3"
+                dot={false}
+                activeDot={{
+                  r: 6, fill: accentColor, strokeWidth: 2.5,
+                  stroke: `${accentColor}44`,
+                  filter: `drop-shadow(0 0 8px ${accentColor})`,
+                }}
               />
             </LineChart>
           </ResponsiveContainer>
@@ -937,6 +1011,17 @@ function ModelPredictionCard({ modelName }) {
 function App() {
   const [selectedBond, setSelectedBond] = useState('3-year');
   const [activeTab, setActiveTab] = useState('overview');
+  const [trainingModels, setTrainingModels] = useState(new Set()); // Set of model names currently training
+
+  // Add or remove a model from the training set
+  const handleTrainingChange = (modelName, isTraining) => {
+    setTrainingModels(prev => {
+      const next = new Set(prev);
+      if (isTraining) next.add(modelName);
+      else next.delete(modelName);
+      return next;
+    });
+  };
 
   const currentBondData = selectedBond === '3-year' ? bondData3Year : bondData10Year;
   const bestModel = 'XGBoost';
@@ -948,10 +1033,77 @@ function App() {
       <header className="header">
         <div className="header-content">
           <div className="header-left">
-            <Activity className="header-icon" />
+            {/* Custom logo mark */}
+            <div style={{
+              width: 46, height: 46, borderRadius: 14, flexShrink: 0,
+              background: 'linear-gradient(135deg,#0c2a4a,#0a1e36)',
+              border: '1px solid rgba(56,189,248,0.25)',
+              boxShadow: '0 0 20px rgba(56,189,248,0.15), inset 0 1px 0 rgba(56,189,248,0.12)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}>
+              <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+                <polyline points="1,18 6,10 10,14 14,6 18,11 22,4 25,8"
+                  stroke="#38bdf8" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                  fill="none" style={{ filter: 'drop-shadow(0 0 4px rgba(56,189,248,0.8))' }} />
+                <circle cx="25" cy="8" r="2" fill="#4ade80"
+                  style={{ filter: 'drop-shadow(0 0 5px rgba(74,222,128,0.9))' }}>
+                  <animate attributeName="opacity" values="1;0.3;1" dur="1.8s" repeatCount="indefinite" />
+                </circle>
+              </svg>
+            </div>
+
             <div>
               <h1>G-Sec Bond Market Prediction</h1>
-              <p className="subtitle">AI-Powered Bond Price Forecasting</p>
+              <p className="subtitle">AI-Powered Bond Yield Forecasting · India</p>
+            </div>
+          </div>
+
+          {/* Right side badge */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            {/* Right side badges */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+              {trainingModels.size === 0 ? (
+                /* Idle */
+                <div style={{
+                  display: 'flex', alignItems: 'center', gap: 7,
+                  padding: '6px 14px',
+                  background: 'rgba(74,222,128,0.08)',
+                  border: '1px solid rgba(74,222,128,0.22)',
+                  borderRadius: 99,
+                  fontSize: '0.72rem', fontWeight: 700, color: '#4ade80',
+                  letterSpacing: '0.06em',
+                }}>
+                  <span style={{
+                    width: 7, height: 7, borderRadius: '50%', background: '#4ade80',
+                    boxShadow: '0 0 8px rgba(74,222,128,0.8)',
+                    flexShrink: 0, display: 'inline-block',
+                  }} />
+                  LIVE · 4 MODELS
+                </div>
+              ) : (
+                /* One badge per training model */
+                [...trainingModels].map(name => (
+                  <div key={name} style={{
+                    display: 'flex', alignItems: 'center', gap: 7,
+                    padding: '5px 12px',
+                    background: 'rgba(251,191,36,0.08)',
+                    border: '1px solid rgba(251,191,36,0.28)',
+                    borderRadius: 99,
+                    fontSize: '0.7rem', fontWeight: 700, color: '#fbbf24',
+                    letterSpacing: '0.04em', whiteSpace: 'nowrap',
+                  }}>
+                    <span style={{
+                      width: 10, height: 10, borderRadius: '50%',
+                      border: '2px solid rgba(251,191,36,0.2)',
+                      borderTopColor: '#fbbf24',
+                      display: 'inline-block',
+                      animation: 'spin 0.7s linear infinite',
+                      flexShrink: 0,
+                    }} />
+                    {name}
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
@@ -963,11 +1115,12 @@ function App() {
           { key: 'predictions', label: 'Predictions', Icon: Brain },
           { key: 'models', label: 'Models', Icon: Target },
           { key: 'data', label: 'Research', Icon: Database },
+          { key: 'authors', label: 'Authors', Icon: Activity },
         ].map(({ key, label, Icon }) => (
           <button
             key={key}
             className={`nav-tab ${activeTab === key ? 'active' : ''}`}
-            onClick={() => setActiveTab(key)}
+            onClick={() => { setActiveTab(key); setTrainingModels(new Set()); }}
           >
             <Icon size={18} /> {label}
           </button>
@@ -1069,7 +1222,7 @@ function App() {
               Click <strong style={{ color: '#94a3b8' }}>⚡ Live Compute</strong> to train and see real results.
             </p>
             {Object.keys(modelMetrics).map((name) => (
-              <ModelPredictionCard key={name} modelName={name} />
+              <ModelPredictionCard key={name} modelName={name} onTrainingChange={handleTrainingChange} />
             ))}
           </div>
         )}
@@ -1689,10 +1842,175 @@ function App() {
           </div>
         )}
 
+        {/* ══════════════ AUTHORS ══════════════ */}
+        {activeTab === 'authors' && (
+          <div className="tab-content">
+            {/* Header */}
+            <div style={{
+              background: 'linear-gradient(135deg,rgba(129,140,248,0.08) 0%,rgba(56,189,248,0.06) 100%)',
+              border: '1px solid rgba(129,140,248,0.15)',
+              borderRadius: 24, padding: '36px 40px', marginBottom: 28,
+              position: 'relative', overflow: 'hidden',
+            }}>
+              <div style={{
+                position: 'absolute', top: -60, right: -60, width: 240, height: 240,
+                background: 'radial-gradient(circle,rgba(129,140,248,0.12),transparent 70%)', pointerEvents: 'none'
+              }} />
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', color: '#818cf8', marginBottom: 10 }}>
+                Final Year Project · IEEE Research · 2025–26
+              </div>
+              <h2 style={{ margin: '0 0 12px', fontSize: '1.6rem', fontWeight: 800, color: '#f0f6ff', lineHeight: 1.2 }}>
+                Meet the Team
+              </h2>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: '#64748b', maxWidth: 640, lineHeight: 1.75 }}>
+                This project was developed as a Final Year B.Tech project, combining machine learning,
+                deep learning, and financial data science to predict Indian G-Sec bond yields.
+              </p>
+            </div>
+
+            {/* Author cards */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(340px,1fr))', gap: 20, marginBottom: 28 }}>
+              {[
+                {
+                  name: 'T Shankarsai',
+                  initials: 'TS',
+                  color: '#38bdf8',
+                  role: 'Web Developer · Research Contributor',
+                  college: 'B.Tech · Computer Science & Engineering',
+                  bio: 'Designed and built the complete full-stack web application — React dashboard, Flask REST API, and deployed the system on Render. Also contributed to the IEEE research paper writing and analysis.',
+                  contributions: ['React 19 dashboard & UI/UX', 'Flask REST API backend', 'Render deployment (frontend + backend)', 'Research paper contribution', 'Data visualisation (Recharts)'],
+                  tech: ['React', 'Vite', 'Flask', 'JavaScript', 'Python'],
+                  github: 'https://github.com/ROCKSTAR2307',
+                },
+                {
+                  name: 'S Vigneshwaraan',
+                  initials: 'SV',
+                  color: '#818cf8',
+                  role: 'ML Engineer · Data Scientist',
+                  college: 'B.Tech · Computer Science & Engineering',
+                  bio: 'Led the entire machine learning pipeline — dataset curation, feature engineering, and training all four models (Linear Regression, ARIMA, DLSTM, XGBoost) on 21 years of G-Sec yield data.',
+                  contributions: ['Linear Regression & ARIMA models', 'DLSTM (2-layer deep LSTM)', 'XGBoost (best MAPE: 0.13%)', 'Data preprocessing & feature engineering', 'Model evaluation & benchmarking'],
+                  tech: ['Python', 'TensorFlow', 'XGBoost', 'scikit-learn', 'statsmodels'],
+                  github: '#',
+                },
+              ].map((author) => (
+                <div key={author.name} style={{
+                  background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+                  border: `1px solid ${author.color}22`,
+                  borderRadius: 20, overflow: 'hidden',
+                }}>
+                  {/* Top accent bar */}
+                  <div style={{ height: 3, background: `linear-gradient(90deg,${author.color},#818cf8)` }} />
+
+                  <div style={{ padding: '28px 28px 24px' }}>
+                    {/* Avatar + name */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 20 }}>
+                      <div style={{
+                        width: 64, height: 64, borderRadius: '50%', flexShrink: 0,
+                        background: `linear-gradient(135deg,${author.color}33,${author.color}11)`,
+                        border: `2px solid ${author.color}44`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        fontSize: '1.3rem', fontWeight: 800, color: author.color,
+                        boxShadow: `0 0 24px ${author.color}22`,
+                        letterSpacing: '-0.02em',
+                      }}>{author.initials}</div>
+                      <div>
+                        <div style={{ fontSize: '1.1rem', fontWeight: 800, color: '#f0f6ff', lineHeight: 1.2 }}>{author.name}</div>
+                        <div style={{ fontSize: '0.75rem', color: author.color, fontWeight: 600, marginTop: 4 }}>{author.role}</div>
+                        <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: 2 }}>{author.college}</div>
+                      </div>
+                    </div>
+
+                    {/* Bio */}
+                    <p style={{ margin: '0 0 20px', fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.75 }}>{author.bio}</p>
+
+                    {/* Contributions */}
+                    <div style={{ marginBottom: 18 }}>
+                      <div style={{ fontSize: '0.65rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#475569', marginBottom: 10 }}>Key Contributions</div>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                        {author.contributions.map(c => (
+                          <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: author.color, flexShrink: 0 }} />
+                            <span style={{ fontSize: '0.78rem', color: '#94a3b8' }}>{c}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Tech */}
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+                      {author.tech.map(t => (
+                        <span key={t} style={{
+                          fontSize: '0.62rem', padding: '3px 9px',
+                          background: `${author.color}12`,
+                          border: `1px solid ${author.color}25`,
+                          borderRadius: 99, color: author.color, fontWeight: 700,
+                        }}>{t}</span>
+                      ))}
+                    </div>
+
+                    {/* Social links */}
+                    <div style={{ display: 'flex', gap: 10 }}>
+                      <a href={author.github} target="_blank" rel="noopener noreferrer" style={{
+                        display: 'flex', alignItems: 'center', gap: 6,
+                        fontSize: '0.72rem', fontWeight: 600, color: '#64748b',
+                        padding: '6px 14px', borderRadius: 8,
+                        background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.06)',
+                        textDecoration: 'none', transition: 'color 0.2s',
+                      }}
+                        onMouseEnter={e => e.currentTarget.style.color = '#f0f6ff'}
+                        onMouseLeave={e => e.currentTarget.style.color = '#64748b'}
+                      >
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
+                        </svg>
+                        GitHub
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Project summary card */}
+            <div style={{
+              background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+              border: '1px solid rgba(56,189,248,0.10)',
+              borderRadius: 20, padding: '28px 32px',
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                <span style={{ fontSize: '1.2rem' }}>🏫</span>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#f0f6ff' }}>Project Summary</h3>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(200px,1fr))', gap: 16 }}>
+                {[
+                  { label: 'Dataset Size', value: '~2,943', sub: 'Daily G-Sec data points', color: '#38bdf8' },
+                  { label: 'Date Range', value: '2003–24', sub: '21 years of market data', color: '#818cf8' },
+                  { label: 'Features Used', value: '20', sub: 'Macro & technical indicators', color: '#4ade80' },
+                  { label: 'Best MAPE', value: '0.13%', sub: 'XGBoost on 10-Year bond', color: '#fbbf24' },
+                  { label: 'Best R²', value: '99.38%', sub: 'XGBoost on 10-Year bond', color: '#f472b6' },
+                  { label: 'Models Tested', value: '4', sub: 'LR · ARIMA · DLSTM · XGBoost', color: '#fb923c' },
+                ].map(item => (
+                  <div key={item.label} style={{
+                    background: `${item.color}08`, border: `1px solid ${item.color}18`,
+                    borderRadius: 14, padding: '16px 18px',
+                  }}>
+                    <div style={{ fontSize: '0.65rem', color: '#475569', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 6 }}>{item.label}</div>
+                    <div style={{ fontSize: '1.6rem', fontWeight: 800, color: item.color, letterSpacing: '-0.02em', lineHeight: 1 }}>{item.value}</div>
+                    <div style={{ fontSize: '0.68rem', color: '#475569', marginTop: 6 }}>{item.sub}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
 
       <footer className="footer">
-        <p>G-Sec Bond Market Prediction System © 2026 | Powered by Deep Learning &amp; AI</p>
+        <div style={{ fontSize: '0.72rem', color: '#334155', textAlign: 'center', width: '100%' }}>
+          G-Sec Bond Market Prediction · Final Year Project · © 2026 Thaneesh Shankarsai
+        </div>
       </footer>
     </div>
   );
