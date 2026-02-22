@@ -49,6 +49,7 @@ const MODEL_COLORS = {
   'DLSTM': '#c084fc',   // purple
   'XGBoost': '#34d399',   // emerald
 };
+const USER_PREDICT_MODELS = ['Linear Regression', 'ARIMA', 'DLSTM', 'XGBoost'];
 
 // Actual line is always the same near-white so it's always distinct
 const ACTUAL_LINE_COLOR = '#e2e8f0';
@@ -1025,7 +1026,6 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
 
 function UserPredictionTab({ onTrainingChange }) {
   const [bondType, setBondType] = useState('3-year');
-  const [modelName, setModelName] = useState('XGBoost');
   const [dateRange, setDateRange] = useState({ min_date: '', max_date: '', dates: [] });
   const [selectedDate, setSelectedDate] = useState('');
   const [features, setFeatures] = useState({});
@@ -1044,7 +1044,6 @@ function UserPredictionTab({ onTrainingChange }) {
     if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
     closeTimerRef.current = setTimeout(() => {
       setPrediction(null);
-      setPredictionFilters(null);
       setIsClosingPrediction(false);
       closeTimerRef.current = null;
     }, 220);
@@ -1128,30 +1127,41 @@ function UserPredictionTab({ onTrainingChange }) {
     if (!selectedDate) return;
     setLoadingPrediction(true);
     setError(null);
-    onTrainingChange?.(modelName, true);
+    onTrainingChange?.('All Models', true);
     const startTime = Date.now();
     try {
-      const result = await bondAPI.predictSingle(selectedDate, bondType, modelName);
-      const hasAllMetrics =
-        result?.metrics &&
-        ['mape', 'mae', 'mse', 'r2'].every((k) => result.metrics[k] !== null && result.metrics[k] !== undefined);
+      const results = await Promise.all(
+        USER_PREDICT_MODELS.map(async (model) => {
+          const result = await bondAPI.predictSingle(selectedDate, bondType, model);
+          const hasAllMetrics =
+            result?.metrics &&
+            ['mape', 'mae', 'mse', 'r2'].every((k) => result.metrics[k] !== null && result.metrics[k] !== undefined);
 
-      let merged = result;
-      if (!hasAllMetrics) {
-        const computeResult = await bondAPI.compute(bondType, modelName);
-        merged = {
-          ...result,
-          metrics: computeResult?.metrics || null,
-        };
-      }
+          let merged = result;
+          if (!hasAllMetrics) {
+            const computeResult = await bondAPI.computeInstant(bondType, model);
+            merged = {
+              ...result,
+              metrics: computeResult?.metrics || null,
+            };
+          }
+          return [model, merged];
+        })
+      );
 
       if (closeTimerRef.current) {
         clearTimeout(closeTimerRef.current);
         closeTimerRef.current = null;
       }
       setIsClosingPrediction(false);
-      setPrediction(merged);
-      if (merged?.date) setSelectedDate(merged.date);
+      const modelMap = Object.fromEntries(results);
+      const primary = modelMap['XGBoost'] || modelMap['Linear Regression'] || Object.values(modelMap)[0];
+      setPrediction({
+        date: primary?.date || selectedDate,
+        actual: primary?.actual,
+        models: modelMap,
+      });
+      if (primary?.date) setSelectedDate(primary.date);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -1161,7 +1171,7 @@ function UserPredictionTab({ onTrainingChange }) {
         await new Promise((resolve) => setTimeout(resolve, minBuffer - elapsed));
       }
       setLoadingPrediction(false);
-      onTrainingChange?.(modelName, false);
+      onTrainingChange?.('All Models', false);
     }
   };
 
@@ -1171,10 +1181,16 @@ function UserPredictionTab({ onTrainingChange }) {
         <h2>User Prediction</h2>
       </div>
       <p style={{ color: '#64748b', marginBottom: '1.2rem', fontSize: '0.9rem' }}>
-        Select bond, model, and date. Macro indicators are auto-filled from test data and a single-date prediction is returned.
+        Select bond and date. Macro indicators are auto-filled and predictions for all 4 models are shown together.
       </p>
 
       <div className="section user-prediction-panel">
+        <div className="up-models-strip">
+          <span className="up-models-strip-label">Models Included</span>
+          {USER_PREDICT_MODELS.map((model) => (
+            <span key={model} className="up-model-chip">{model}</span>
+          ))}
+        </div>
         <div className="user-prediction-form-grid">
           <div>
             <label className="up-label">Bond Type</label>
@@ -1189,21 +1205,6 @@ function UserPredictionTab({ onTrainingChange }) {
             >
               <option value="3-year">3-Year</option>
               <option value="10-year">10-Year</option>
-            </select>
-          </div>
-          <div>
-            <label className="up-label">Model</label>
-            <select
-              className="model-select up-select"
-              value={modelName}
-              onChange={(e) => {
-                closePredictionSmooth();
-                setModelName(e.target.value);
-              }}
-            >
-              {Object.keys(modelMetrics).map((name) => (
-                <option value={name} key={name}>{name}</option>
-              ))}
             </select>
           </div>
           <div>
@@ -1248,35 +1249,53 @@ function UserPredictionTab({ onTrainingChange }) {
 
       {prediction && (
         <div className={`section up-result-anim ${isClosingPrediction ? 'up-result-closing' : ''}`}>
-          <h3 className="section-title"><Target size={18} /> Prediction Result</h3>
+          <h3 className="section-title"><Target size={18} /> Prediction Result (All Models)</h3>
           <div className="metrics-grid">
             {[
-              ['MAPE', prediction.metrics?.mape, 4, 'up-metric-mape'],
-              ['MAE', prediction.metrics?.mae, 4, 'up-metric-mae'],
-              ['MSE', prediction.metrics?.mse, 4, 'up-metric-mse'],
-              ['R²', prediction.metrics?.r2, 4, 'up-metric-r2'],
-            ].map(([label, value, digits, cls]) => (
-              <div key={label} className={`metric-card up-result-card up-metric-card ${cls}`}>
-                <div className="metric-label">{label}</div>
-                <div className="up-result-value">
-                  {value !== null && value !== undefined ? Number(value).toFixed(digits) : 'N/A'}
-                </div>
-              </div>
-            ))}
-          </div>
-          <div className="metrics-grid" style={{ marginTop: '1rem' }}>
-            {[
               ['Date', prediction.date],
-              ['Predicted', Number(prediction.predicted).toFixed(5)],
-              ['Actual', Number(prediction.actual).toFixed(5)],
-              ['Abs Error', Number(prediction.error).toFixed(5)],
-              ['% Error', `${Number(prediction.pct_error).toFixed(3)}%`],
+              ['Actual', prediction.actual !== null && prediction.actual !== undefined ? Number(prediction.actual).toFixed(5) : 'N/A'],
             ].map(([label, value]) => (
               <div key={label} className="metric-card up-result-card">
                 <div className="metric-label">{label}</div>
                 <div className="up-result-value">{value}</div>
               </div>
             ))}
+          </div>
+          <div className="up-model-grid">
+            {USER_PREDICT_MODELS.map((model) => {
+              const r = prediction.models?.[model];
+              if (!r) return null;
+              const accent = MODEL_COLORS[model] || '#38bdf8';
+              return (
+                <div
+                  key={model}
+                  className="metric-card up-result-card up-model-card"
+                  style={{
+                    borderColor: `${accent}55`,
+                    boxShadow: `inset 0 0 0 1px ${accent}22`,
+                  }}
+                >
+                  <div className="up-model-title" style={{ color: accent }}>{model}</div>
+                  <div className="up-model-pred">{Number(r.predicted).toFixed(5)}</div>
+                  <div className="up-model-sub">
+                    Abs: {Number(r.error).toFixed(5)} · %: {Number(r.pct_error).toFixed(3)}%
+                  </div>
+                  <div className="up-model-mini-grid">
+                    {[
+                      ['MAPE', r.metrics?.mape],
+                      ['MAE', r.metrics?.mae],
+                      ['MSE', r.metrics?.mse],
+                      ['R²', r.metrics?.r2],
+                    ].map(([label, val]) => (
+                      <div key={label} className="up-model-mini">
+                        <span>{label}</span>
+                        <strong>{val !== null && val !== undefined ? Number(val).toFixed(4) : 'N/A'}</strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -1401,7 +1420,7 @@ function App() {
                       animation: 'spin 0.7s linear infinite',
                       flexShrink: 0,
                     }} />
-                    Training {name} model
+                    {name === 'All Models' ? 'Training all models' : `Training ${name} model`}
                   </div>
                 ))
               )}

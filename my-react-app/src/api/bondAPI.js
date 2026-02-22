@@ -36,29 +36,42 @@ async function handleResponse(res) {
     return res.json();
 }
 
-export const bondAPI = {
-    /**
-     * Train (cached) + return full test-set chart data & metrics.
-     */
-    compute: async (bondType, modelName) => {
-        const mapped = MODEL_MAP[modelName] || 'xgboost';
-        const mappedBond = BOND_MAP[bondType] || '3yr';
-        const minMs = MIN_LOADING_MS[mapped] ?? MIN_LOADING_MS._default;
+async function computeCore(bondType, modelName, withDelay = true) {
+    const mapped = MODEL_MAP[modelName] || 'xgboost';
+    const mappedBond = BOND_MAP[bondType] || '3yr';
+    const minMs = MIN_LOADING_MS[mapped] ?? MIN_LOADING_MS._default;
 
-        const startTime = Date.now();
-        const res = await fetch(`${API_BASE_URL}/compute`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ model: mapped, bond_type: mappedBond }),
-        });
-        const data = await handleResponse(res);
+    const startTime = Date.now();
+    const res = await fetch(`${API_BASE_URL}/compute`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: mapped, bond_type: mappedBond }),
+    });
+    const data = await handleResponse(res);
 
+    if (withDelay) {
         // Enforce minimum spinner duration in frontend (models trained once on backend)
         const elapsed = Date.now() - startTime;
         if (elapsed < minMs) {
             await new Promise(r => setTimeout(r, minMs - elapsed));
         }
-        return data;
+    }
+    return data;
+}
+
+export const bondAPI = {
+    /**
+     * Train (cached) + return full test-set chart data & metrics.
+     */
+    compute: async (bondType, modelName) => {
+        return computeCore(bondType, modelName, true);
+    },
+
+    /**
+     * Same as compute, but without artificial client-side min-delay.
+     */
+    computeInstant: async (bondType, modelName) => {
+        return computeCore(bondType, modelName, false);
     },
 
     /**
