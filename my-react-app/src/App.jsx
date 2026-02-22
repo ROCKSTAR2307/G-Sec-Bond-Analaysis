@@ -2,7 +2,7 @@ import { useState } from 'react';
 import {
   LineChart, Line,
   BarChart, Bar,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, ReferenceLine, Cell,
 } from 'recharts';
 import {
   TrendingUp, TrendingDown, Activity, BarChart3,
@@ -57,144 +57,90 @@ const ACTUAL_LINE_COLOR = '#e2e8f0';
 // ─── Indicators with categories, definitions, and yield impact ───────────────
 
 const ALL_INDICATORS = [
-  // ── MACRO ────────────────────────────────────────────────────────────────
+  // ── MARKET ACTION & VELOCITY ───────────────────────────────────────────────────
   {
-    name: 'GDP Growth Rate', short: 'GDP', cat: 'Macro', impact: '↑', color: '#38bdf8',
-    def: 'Measures the annual % increase in the total value of goods & services produced. Rising GDP reduces demand for safe-haven bonds as risk appetite improves. A key regime-switching signal — when GDP accelerates past 7%, G-Sec yields typically rise 20–40 bps with a 2-quarter lag.'
+    name: 'Change %', short: 'Δ%', cat: 'Market Action', impact: '↕', color: '#38bdf8',
+    def: 'The percentage difference in the bond yield/price compared to the previous trading day. Captures immediate daily momentum and shock reactions.'
   },
   {
-    name: 'Inflation Rate (CPI)', short: 'CPI', cat: 'Macro', impact: '↑', color: '#f472b6',
-    def: 'Consumer Price Index tracks the change in price paid by end consumers. RBI targets CPI ≤ 4%. Every 1% overshoot historically correlates with a ~35 bps rise in the 10-year G-Sec, as markets pre-price tightening. Used as the primary inflationary regime feature in ARIMA and DLSTM models.'
+    name: 'Daily Return (%)', short: 'Return', cat: 'Market Action', impact: '↕', color: '#0ea5e9',
+    def: 'Alternative calculation of the logarithmic or simple daily return of the bond, used as a stationary feature for time-series forecasting.'
   },
   {
-    name: 'RBI Repo Rate', short: 'Repo', cat: 'Macro', impact: '↑', color: '#fb923c',
-    def: 'Rate at which RBI lends to commercial banks overnight. The most direct anchor of the yield curve — a 25 bps hike compresses the spread between Repo and 10Y G-Sec. Fed into the model as a lagged feature (t-1, t-3) because markets anticipate MPC decisions 1–2 meetings ahead.'
+    name: 'Volatility (7D)', short: 'Vol (7D)', cat: 'Market Action', impact: '↑', color: '#818cf8',
+    def: 'The rolling 7-day standard deviation of the bond returns. Used by the models to detect turbulent market regimes and adjust state confidence.'
   },
   {
-    name: 'Exchange Rate (USD/INR)', short: 'FX', cat: 'Macro', impact: '↑', color: '#a78bfa',
-    def: 'Number of rupees per US dollar. Rupee depreciation raises the cost of imports, fuelling inflation and pressuring RBI to raise rates. Also triggers FII debt outflows — a combined effect that historically adds 15–25 bps to the 10-year G-Sec for every 2% depreciation.'
+    name: 'SMA (7D)', short: 'SMA-7', cat: 'Market Action', impact: '↕', color: '#c084fc',
+    def: 'Simple Moving Average over 7 days. Smooths out daily noise to provide a short-term trend line, a crucial feature for the DLSTM sequence modelling.'
   },
   {
-    name: 'Fiscal Deficit (% GDP)', short: 'FD', cat: 'Macro', impact: '↑', color: '#f87171',
-    def: 'Excess of government spending over revenue, financed by G-Sec issuance. Every 100 bps widening in fiscal deficit raises the G-Sec yield by roughly 10–15 bps through the supply channel. The market watches the fiscal slippage announced in the Union Budget as a major yield trigger.'
+    name: 'SMA (30D)', short: 'SMA-30', cat: 'Market Action', impact: '↕', color: '#e879f9',
+    def: 'Simple Moving Average over 30 days. Anchors the medium-term momentum and allows models to detect mean-reversion pullbacks.'
   },
   {
-    name: 'Current Account Balance', short: 'CAB', cat: 'Macro', impact: '↑', color: '#c084fc',
-    def: 'Net of goods, services, and income flows across India\'s borders. India\'s structural CAD (~2% of GDP) makes bond yields sensitive to crude price swings. When CAD widens beyond 3% of GDP, risk premium on 10Y G-Sec rises by 20–30 bps based on historical episodes (2013 Taper Tantrum).'
-  },
-  {
-    name: 'Trade Balance', short: 'TB', cat: 'Macro', impact: '↑', color: '#4ade80',
-    def: 'Difference between merchandise exports and imports. A widening trade deficit signals higher USD demand, weakening the Rupee and ultimately pressuring bond markets. Used as a monthly high-frequency proxy for tracking CAD deterioration in the XGBoost feature set.'
-  },
-  {
-    name: 'Money Supply (M3)', short: 'M3', cat: 'Macro', impact: '↑', color: '#22d3ee',
-    def: 'Broadest measure of money (currency + demand deposits + time deposits). M3 growth above nominal GDP signals excess liquidity that could stoke inflation. RBI uses Variable Rate Reverse Repo and OMO to drain excess M3 — both operations move G-Sec yields.'
-  },
-  {
-    name: 'Industrial Production (IIP)', short: 'IIP', cat: 'Macro', impact: '↑', color: '#34d399',
-    def: 'Monthly output index for manufacturing, mining, and electricity. Strong IIP signals economic expansion, reduces flight-to-safety bond demand, and lowers RBI\'s motivation to cut rates. The model uses 3-month moving average IIP as a trend feature to smooth out base-effect distortions.'
-  },
-  {
-    name: 'Foreign Exchange Reserves', short: 'FXR', cat: 'Macro', impact: '↓', color: '#0ea5e9',
-    def: 'Total foreign currency assets + gold held by RBI (~$620 bn as of 2024). High reserves act as a buffer against Rupee depreciation and FII outflows, reducing the risk premium on sovereign bonds. Reserve drawdown months show a statistically significant 8–12 bps yield spike in our dataset.'
-  },
-  {
-    name: 'Government Debt-to-GDP', short: 'D/GDP', cat: 'Macro', impact: '↑', color: '#f472b6',
-    def: 'Total sovereign debt (central + state) as % of GDP (~85% for India). Higher ratio raises the sovereign risk premium — particularly visible in long-end (10Y+) yields. Used as a slow-moving structural feature in the Linear Regression model, alongside the fiscal deficit gap.'
-  },
-  {
-    name: 'Net FDI Inflows', short: 'FDI', cat: 'Macro', impact: '↓', color: '#34d399',
-    def: 'Long-term foreign equity investment into Indian businesses. Stable FDI improves the Balance of Payments, reduces Rupee volatility, and signals institutional confidence in Indian macros — all of which compress bond risk premia. Distinct from FII flows in that it\'s less sensitive to global risk-off.'
-  },
-  {
-    name: 'Capital Account Balance', short: 'KAB', cat: 'Macro', impact: '↕', color: '#fb923c',
-    def: 'Net financial flows — FDI + FII portfolio + ECB borrowings. Volatile component dominated by FII debt flows that directly impact G-Sec demand. Used as an interaction feature with exchange rate to detect "sudden stop" episodes where both simultaneously deteriorate.'
+    name: '10-Year FBIL (%)', short: '10Y FBIL', cat: 'Market Action', impact: '↕', color: '#a78bfa',
+    def: 'The benchmark 10-year yield reported by FBIL. Used as a cross-reference anchor even when predicting the 3-year bond to capture yield curve slope dynamics.'
   },
 
-  // ── MARKET / FINANCIAL ───────────────────────────────────────────────────
+  // ── RBI RATES & LIQUIDITY ──────────────────────────────────────────────────
   {
-    name: 'Crude Oil Price (Brent)', short: 'OIL', cat: 'Market', impact: '↑', color: '#f97316',
-    def: 'Brent crude benchmark in USD/barrel. India imports ~85% of oil requirements — every $10/bbl rise adds ~₹1.2 trillion to the import bill, widening the fiscal and current accounts, fuelling inflation, and pushing G-Sec yields 15–20 bps higher. Highest individual Granger-causality score in our feature importance analysis.'
+    name: 'Policy Repo Rate (%)', short: 'Repo', cat: 'Liquidity', impact: '↑', color: '#f97316',
+    def: 'The primary policy rate at which RBI lends to commercial banks. The ultimate anchor of the short-term yield curve.'
   },
   {
-    name: 'Gold Prices (MCX)', short: 'GOLD', cat: 'Market', impact: '↓', color: '#fbbf24',
-    def: 'Domestic gold futures on MCX (tracking LBMA gold). Gold and G-Secs are co-safe-haven assets — both rally during global risk-off episodes (e.g., COVID-19, Russia-Ukraine war). Negative correlation with equity markets makes it a useful regime indicator in the DLSTM regime embedding.'
+    name: 'Reverse Repo Rate (%)', short: 'Rev Repo', cat: 'Liquidity', impact: '↓', color: '#fbbf24',
+    def: 'The rate at which banks park surplus funds with RBI. Acts as the lower bound of the overnight rate corridor during surplus liquidity periods.'
   },
   {
-    name: 'Stock Market (NIFTY 50)', short: 'EQ', cat: 'Market', impact: '↑', color: '#f59e0b',
-    def: 'NSE flagship equity index. Strong equity rally signals risk-on appetite and triggers rotation from bonds into stocks, pushing G-Sec yields up. The equity-bond inverse relationship holds in ~72% of months in our dataset. NIFTY VIX (implied volatility) was also tested but showed multicollinearity with NIFTY.'
+    name: 'MSF Rate (%)', short: 'MSF', cat: 'Liquidity', impact: '↑', color: '#f59e0b',
+    def: 'The penal rate at which banks can borrow overnight funds from RBI against G-Secs. Forms the upper bound of the interest rate corridor.'
   },
   {
-    name: 'Corporate Bond Spreads', short: 'CS', cat: 'Market', impact: '↓', color: '#e879f9',
-    def: 'Yield premium over G-Sec for AAA-rated corporate bonds of the same tenor. Widening spreads signal credit stress and trigger flight-to-safety flows into G-Secs, compressing yields. The spread also reflects banking system health — a leading indicator for RBI liquidity action.'
+    name: 'Bank Rate (%)', short: 'Bank Rate', cat: 'Liquidity', impact: '↑', color: '#f43f5e',
+    def: 'The standard rate at which RBI buys or rediscounts bills of exchange or other commercial papers. Aligned with the MSF rate.'
   },
   {
-    name: 'Yield Curve Slope (10Y−1Y)', short: 'YCS', cat: 'Market', impact: '↕', color: '#38bdf8',
-    def: 'Difference between 10-year and 1-year G-Sec yields. A steep curve (>150 bps) signals growth expectations and eventual rate hikes; a flat/inverted curve (<50 bps) signals near-term cuts. Used as an endogenous lagged feature in ARIMA and as a regime label in DLSTM.'
+    name: 'Base Rate (%)', short: 'Base Rate', cat: 'Liquidity', impact: '↑', color: '#fb923c',
+    def: 'The minimum interest rate below which banks cannot lend to their customers. A slow-moving indicator of systemic credit costs.'
   },
   {
-    name: 'Net FII Debt Flows', short: 'FII', cat: 'Market', impact: '↕', color: '#818cf8',
-    def: 'Monthly net purchase/sale of Indian debt securities by foreign investors. FII inflows compress G-Sec yields by adding demand; outflows during global tightening cycles (2013, 2018, 2022) sharply spike yields. One of the top-3 features by SHAP value in XGBoost for 10-year bond prediction.'
-  },
-
-  // ── LIQUIDITY / MONETARY ──────────────────────────────────────────────────
-  {
-    name: 'RBI Repo Rate', short: 'RR', cat: 'Liquidity', impact: '↑', color: '#fb923c',
-    def: 'Short-term lending rate of RBI — already listed above under Macro for completeness in the full indicator table.'
+    name: 'Cash Reserve Ratio (%)', short: 'CRR', cat: 'Liquidity', impact: '↑', color: '#4ade80',
+    def: 'The fraction of deposits banks must hold with RBI as balance. Hikes drain systemic liquidity, putting upward pressure on yields.'
   },
   {
-    name: 'Reverse Repo / SDF Rate', short: 'SDF', cat: 'Liquidity', impact: '↓', color: '#22d3ee',
-    def: 'Rate at which RBI absorbs surplus liquidity from banks (now the Standing Deposit Facility rate). The lower bound of the LAF corridor. When the overnight rate collapses toward the SDF, it signals surplus liquidity — putting downward pressure on short-term G-Sec yields.'
-  },
-  {
-    name: 'Cash Reserve Ratio (CRR)', short: 'CRR', cat: 'Liquidity', impact: '↑', color: '#4ade80',
-    def: 'Fraction of deposits banks must hold with RBI (currently 4.5%). A CRR hike drains banking system liquidity, tightens money markets, and pushes short-end G-Sec yields higher. CRR changes (rare) are used as a dummy variable in the ARIMA model.'
-  },
-  {
-    name: 'Statutory Liquidity Ratio', short: 'SLR', cat: 'Liquidity', impact: '↓', color: '#a3e635',
-    def: 'Fraction of deposits banks must maintain in liquid assets (mainly G-Secs) — currently 18%. SLR creates a structural captive demand for government bonds, keeping yields lower than they would be otherwise. SLR reductions reduce mandatory G-Sec demand, introducing mild upward yield pressure.'
-  },
-  {
-    name: 'LAF Net Liquidity', short: 'LAF', cat: 'Liquidity', impact: '↓', color: '#f59e0b',
-    def: 'Net daily liquidity injected/absorbed by RBI through the Liquidity Adjustment Facility (repo + reverse repo + SDF). Surplus LAF (banks parking excess funds) compresses overnight rates and G-Sec yields. Deficit LAF periods (2018, 2019) coincided with 50–80 bps yield spikes in the 3-year bond.'
-  },
-  {
-    name: 'RBI OMO Operations', short: 'OMO', cat: 'Liquidity', impact: '↓', color: '#818cf8',
-    def: 'RBI\'s open-market purchases/sales of G-Secs to manage system liquidity. OMO purchases inject base money and directly boost G-Sec prices (reduce yields). OMO calendar announcements are event-driven yield movers — modelled as a structural break dummy in ARIMA.'
-  },
-  {
-    name: 'Money Market Rate (MIBOR)', short: 'MIBOR', cat: 'Liquidity', impact: '↑', color: '#ff6b6b',
-    def: 'Mumbai Interbank Offered Rate — overnight rate for unsecured interbank lending. MIBOR anchors the short end of the yield curve; sustained MIBOR-repo spread > 20 bps signals liquidity tightness, which short-end G-Secs reprice to reflect.'
-  },
-  {
-    name: 'Bank Credit Growth', short: 'BCG', cat: 'Liquidity', impact: '↑', color: '#22d3ee',
-    def: 'Year-on-year growth in scheduled commercial bank credit. High credit growth reduces bank surplus funds available for G-Sec investment, raising yields through reduced SLR-excess buying. A secondary feature in XGBoost, capturing the credit-deposit ratio tightening signal.'
+    name: 'Statutory Liquidity (%)', short: 'SLR', cat: 'Liquidity', impact: '↓', color: '#2dd4bf',
+    def: 'The fraction of deposits banks must invest in liquid assets (chiefly G-Secs). Directly creates a captive demand loop for sovereign bonds.'
   },
 
-  // ── MICRO / ACTIVITY ──────────────────────────────────────────────────────
+  // ── MONEY MARKET & FOREX ─────────────────────────────────────────────────
   {
-    name: 'WPI Inflation', short: 'WPI', cat: 'Micro', impact: '↑', color: '#fbbf24',
-    def: 'Wholesale Price Index — upstream producer price pressures. WPI leads CPI by ~2–3 months in the Indian context. Sustained WPI > 6% historically precedes RBI tightening, making it a predictive leading indicator for forward-looking bond price models. Feature importance: 4th highest in Linear Regression.'
+    name: '91-Day T-Bill Yield (%)', short: '91D', cat: 'Micro', impact: '↑', color: '#34d399',
+    def: 'Yield on 3-month government paper. Tracks immediate short-term systemic liquidity, risk-free rate, and inflation expectations.'
   },
   {
-    name: 'PMI Composite', short: 'PMI', cat: 'Micro', impact: '↑', color: '#4ade80',
-    def: 'Purchasing Managers\' Index — monthly survey of manufacturing + services activity. PMI > 50 = expansion; PMI < 50 = contraction. A high PMI reduces risk-off demand for G-Secs and signals favourable growth that allows RBI to hold or raise rates. Strong forward-looking signal for short-end G-Sec yields.'
+    name: '182-Day T-Bill Yield (%)', short: '182D', cat: 'Micro', impact: '↑', color: '#10b981',
+    def: 'Yield on 6-month government paper. Fills out the short end of the yield curve.'
   },
   {
-    name: 'T-Bill Yield (91-day)', short: 'T91', cat: 'Micro', impact: '↑', color: '#38bdf8',
-    def: '91-day Treasury Bill auction cut-off yield — the risk-free short-term rate. Acts as the benchmark for short-end G-Sec yields. Strong co-integration with Repo rate; deviations signal near-term market tightness. Used as an endogenous feature in the 3-year bond model to capture term structure dynamics.'
+    name: '364-Day T-Bill Yield (%)', short: '364D', cat: 'Micro', impact: '↑', color: '#059669',
+    def: 'Yield on 1-year government paper. The essential bridge connecting money markets to the medium-term G-Sec bond market.'
   },
   {
-    name: 'OIS Rate (1Y)', short: 'OIS', cat: 'Micro', impact: '↑', color: '#c084fc',
-    def: 'Overnight Index Swap — the 1-year fixed rate of swapping overnight floating MIBOR for a fixed rate. OIS is a market-based estimate of future policy rates. OIS-G-Sec spread is a key measure of market liquidity risk. Extracted as a forward-rate proxy feature in the DLSTM model\'s input sequence.'
+    name: 'FX Premia 1-month (%)', short: 'FX 1M', cat: 'Macro', impact: '↑', color: '#22d3ee',
+    def: 'The 1-month forward premium on the USD/INR currency pair. Reflects the covered interest parity gap and immediate FII currency hedging costs.'
   },
   {
-    name: 'G-Sec Traded Volume', short: 'VOL', cat: 'Micro', impact: '↕', color: '#f472b6',
-    def: 'Daily NDS-OM traded volume of G-Secs (all tenors). Low volume signals poor price discovery and bid-ask spread widening; high volumes during RBI trading windows indicate institutional positioning. Used as a market microstructure feature to weight confidence intervals in the XGBoost predictions.'
+    name: 'FX Premia 3-month (%)', short: 'FX 3M', cat: 'Macro', impact: '↑', color: '#06b6d4',
+    def: 'The 3-month forward premium on USD/INR. A critical indicator of medium-term currency depreciation expectations.'
   },
   {
-    name: 'SDL Spread (10Y)', short: 'SDL', cat: 'Micro', impact: '↑', color: '#fb923c',
-    def: 'Premium of State Development Loan yields over central G-Sec yields of the same tenor. Widening SDL spreads signal fiscal stress at the state level, increasing overall government borrowing cost and crowding out central G-Sec demand. Monitored as a systemic fiscal risk indicator.'
+    name: 'FX Premia 6-month (%)', short: 'FX 6M', cat: 'Macro', impact: '↑', color: '#0891b2',
+    def: 'The 6-month forward premium on USD/INR. Used by foreign portfolio investors to price out exchange risk on Indian debt.'
+  },
+  {
+    name: 'FX Reserves (US $M)', short: 'Reserves', cat: 'Macro', impact: '↓', color: '#6366f1',
+    def: 'RBI\'s total US Dollar and foreign currency asset stockpile. Significant drainages indicate central bank market interventions to protect the Rupee, tightening systemic liquidity.'
   },
 ];
 
@@ -1016,7 +962,7 @@ function App() {
           { key: 'overview', label: 'Overview', Icon: BarChart3 },
           { key: 'predictions', label: 'Predictions', Icon: Brain },
           { key: 'models', label: 'Models', Icon: Target },
-          { key: 'data', label: 'Data Analysis', Icon: Database },
+          { key: 'data', label: 'Research', Icon: Database },
         ].map(({ key, label, Icon }) => (
           <button
             key={key}
@@ -1139,110 +1085,606 @@ function App() {
               </div>
             </div>
 
-            <div className="chart-container">
-              <h3 className="chart-title">R² Score Comparison ({selectedBond})</h3>
-              <ResponsiveContainer width="100%" height={400}>
+            {/* ── Premium Chart ───────────────────────────────────────────── */}
+            <div style={{
+              background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+              border: '1px solid rgba(56,189,248,0.12)',
+              borderRadius: '20px',
+              padding: '28px 32px 20px',
+              marginBottom: '24px',
+            }}>
+              {/* Title + description lines */}
+              <div style={{ marginBottom: '6px' }}>
+                <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 700, color: '#f0f6ff', letterSpacing: '-0.01em' }}>
+                  Model Accuracy — MAPE &amp; R² Comparison
+                  <span style={{
+                    marginLeft: 10, fontSize: '0.72rem', fontWeight: 500,
+                    background: `linear-gradient(90deg,#38bdf8,#818cf8)`,
+                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+                  }}>({selectedBond} bond)</span>
+                </h3>
+                <p style={{ margin: '6px 0 2px', fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.6 }}>
+                  <span style={{ color: '#4ade80', fontWeight: 600 }}>MAPE (Mean Absolute Percentage Error)</span> — lower is better;
+                  measures how closely the model's predictions track real bond yields on average.
+                </p>
+                <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.6 }}>
+                  <span style={{ color: '#818cf8', fontWeight: 600 }}>R² Score</span> — higher is better;
+                  measures the proportion of yield variance explained by the model (ARIMA excluded — no macro features).
+                </p>
+              </div>
+
+              <ResponsiveContainer width="100%" height={340}>
                 <BarChart
-                  data={Object.entries(modelMetrics)
-                    .filter(([, v]) => v[selectedBond].r2 !== null)
-                    .map(([name, values]) => ({
-                      name,
-                      r2: values[selectedBond].r2 * 100,
-                      mape: values[selectedBond].mape * 100,
-                    }))}
+                  barCategoryGap="30%"
+                  barGap={4}
+                  data={Object.entries(modelMetrics).map(([name, values]) => ({
+                    name,
+                    'MAPE %': +(values[selectedBond].mape * 100).toFixed(4),
+                    'R² %': values[selectedBond].r2 !== null ? +(values[selectedBond].r2 * 100).toFixed(2) : null,
+                    mapeRaw: values[selectedBond].mape,
+                    maeRaw: values[selectedBond].mae,
+                    mseRaw: values[selectedBond].mse,
+                    r2Raw: values[selectedBond].r2,
+                  }))}
+                  margin={{ top: 20, right: 20, left: -10, bottom: 0 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" stroke="#374151" />
-                  <XAxis dataKey="name" stroke="#9ca3af" />
-                  <YAxis stroke="#9ca3af" />
+                  <defs>
+                    <linearGradient id="gradMape" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#4ade80" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#059669" stopOpacity={0.7} />
+                    </linearGradient>
+                    <linearGradient id="gradR2" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="0%" stopColor="#818cf8" stopOpacity={0.95} />
+                      <stop offset="100%" stopColor="#4f46e5" stopOpacity={0.7} />
+                    </linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="4 4" stroke="rgba(148,163,184,0.08)" vertical={false} />
+                  <XAxis dataKey="name" stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 13, fontWeight: 600 }} tickLine={false} axisLine={false} />
+                  <YAxis stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 11 }} tickLine={false} axisLine={false} tickFormatter={v => `${v}%`} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: '#1f2937', border: '1px solid #374151', borderRadius: '8px' }}
-                    labelStyle={{ color: '#f3f4f6' }}
-                    formatter={(value) => `${value.toFixed(2)}%`}
+                    cursor={{ fill: 'rgba(148,163,184,0.04)' }}
+                    content={({ active, payload, label }) => {
+                      if (!active || !payload?.length) return null;
+                      const d = payload[0]?.payload || {};
+                      const bestMape = Math.min(...Object.values(modelMetrics).map(v => v[selectedBond].mape));
+                      const isBest = Math.abs(d.mapeRaw - bestMape) < 1e-9;
+                      return (
+                        <div style={{
+                          background: 'linear-gradient(160deg,#0f1f35,#0b1424)',
+                          border: '1px solid rgba(74,222,128,0.25)',
+                          borderRadius: '14px', padding: '16px 20px',
+                          boxShadow: '0 20px 60px rgba(0,0,0,0.6)',
+                          minWidth: '210px',
+                        }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+                            <span style={{ fontSize: '1rem', fontWeight: 700, color: '#f0f6ff' }}>{label}</span>
+                            {isBest && <span style={{ fontSize: '0.65rem', padding: '2px 7px', background: 'rgba(74,222,128,0.18)', color: '#4ade80', borderRadius: 99, fontWeight: 700 }}>BEST MAPE ★</span>}
+                          </div>
+                          {/* MAPE hero */}
+                          <div style={{ background: 'rgba(74,222,128,0.08)', border: '1px solid rgba(74,222,128,0.2)', borderRadius: 10, padding: '10px 14px', marginBottom: 10 }}>
+                            <div style={{ fontSize: '0.7rem', color: '#4ade80', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 4 }}>⭐ MAPE (Primary Metric)</div>
+                            <div style={{ fontSize: '1.4rem', fontWeight: 800, color: '#4ade80' }}>{(d.mapeRaw * 100).toFixed(4)}%</div>
+                            <div style={{ fontSize: '0.72rem', color: '#64748b', marginTop: 2 }}>Avg error per prediction on real yields</div>
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                            <div style={{ background: 'rgba(129,140,248,0.08)', borderRadius: 8, padding: '8px 10px' }}>
+                              <div style={{ fontSize: '0.65rem', color: '#818cf8', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>R²</div>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, color: d.r2Raw !== null ? '#818cf8' : '#64748b' }}>
+                                {d.r2Raw !== null ? `${(d.r2Raw * 100).toFixed(2)}%` : 'N/A'}
+                              </div>
+                            </div>
+                            <div style={{ background: 'rgba(248,113,113,0.08)', borderRadius: 8, padding: '8px 10px' }}>
+                              <div style={{ fontSize: '0.65rem', color: '#f87171', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>MAE</div>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#f87171' }}>{d.maeRaw?.toFixed(4)}</div>
+                            </div>
+                            <div style={{ background: 'rgba(251,191,36,0.08)', borderRadius: 8, padding: '8px 10px', gridColumn: '1/-1' }}>
+                              <div style={{ fontSize: '0.65rem', color: '#fbbf24', fontWeight: 700, textTransform: 'uppercase', marginBottom: 3 }}>MSE</div>
+                              <div style={{ fontSize: '1rem', fontWeight: 700, color: '#fbbf24' }}>{d.mseRaw?.toFixed(4)}</div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    }}
                   />
-                  <Legend />
-                  <Bar dataKey="r2" fill="#3b82f6" name="R² Score %" radius={[8, 8, 0, 0]} />
+                  <Legend
+                    formatter={(value) => <span style={{ color: '#94a3b8', fontSize: '0.82rem', fontWeight: 600 }}>{value}</span>}
+                  />
+                  <Bar dataKey="MAPE %" fill="url(#gradMape)" radius={[6, 6, 0, 0]} maxBarSize={52}>
+                    {Object.entries(modelMetrics).map(([name]) => (
+                      <Cell key={name} />
+                    ))}
+                  </Bar>
+                  <Bar dataKey="R² %" fill="url(#gradR2)" radius={[6, 6, 0, 0]} maxBarSize={52}>
+                    {Object.entries(modelMetrics).map(([name, values]) => (
+                      <Cell key={name} fillOpacity={values[selectedBond].r2 === null ? 0.25 : 1} />
+                    ))}
+                  </Bar>
                 </BarChart>
               </ResponsiveContainer>
             </div>
 
-            <div className="table-container">
-              <table className="model-table">
-                <thead>
-                  <tr><th>Model</th><th>MAPE</th><th>MAE</th><th>MSE</th><th>R² Score</th></tr>
-                </thead>
-                <tbody>
-                  {Object.entries(modelMetrics).map(([name, values], i) => (
-                    <tr key={i}>
-                      <td className="model-name">{name}</td>
-                      <td>{values[selectedBond].mape.toFixed(4)}</td>
-                      <td>{values[selectedBond].mae.toFixed(4)}</td>
-                      <td>{values[selectedBond].mse.toFixed(4)}</td>
-                      <td className="accuracy-cell">
-                        {values[selectedBond].r2 !== null ? (
-                          <>
-                            <div className="accuracy-bar" style={{ width: `${values[selectedBond].r2 * 100}%` }} />
-                            <span>{(values[selectedBond].r2 * 100).toFixed(2)}%</span>
-                          </>
-                        ) : (
-                          <span className="na-value">N/A</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {/* ── Premium Table ────────────────────────────────────────────── */}
+            {(() => {
+              const bestMape = Math.min(...Object.values(modelMetrics).map(v => v[selectedBond].mape));
+              const worstMape = Math.max(...Object.values(modelMetrics).map(v => v[selectedBond].mape));
+              return (
+                <div style={{
+                  background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+                  border: '1px solid rgba(56,189,248,0.10)',
+                  borderRadius: '20px',
+                  overflow: 'hidden',
+                }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(15,31,55,0.9)' }}>
+                        {[['Model', 'left'], ['MAPE ★', 'center'], ['MAE', 'center'], ['MSE', 'center'], ['R² Score', 'center']].map(([h, align]) => (
+                          <th key={h} style={{
+                            padding: '14px 20px', fontSize: '0.72rem', fontWeight: 700,
+                            textTransform: 'uppercase', letterSpacing: '0.1em',
+                            color: h === 'MAPE ★' ? '#4ade80' : '#64748b',
+                            textAlign: align,
+                            borderBottom: '1px solid rgba(255,255,255,0.06)',
+                          }}>{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Object.entries(modelMetrics).map(([name, values], i) => {
+                        const m = values[selectedBond];
+                        const isBest = Math.abs(m.mape - bestMape) < 1e-9;
+                        const isWorst = Math.abs(m.mape - worstMape) < 1e-9;
+                        const mapeColor = isBest ? '#4ade80' : isWorst ? '#f97316' : '#94a3b8';
+                        const rowBg = isBest
+                          ? 'rgba(74,222,128,0.04)'
+                          : i % 2 === 0 ? 'rgba(255,255,255,0.015)' : 'transparent';
+                        const MODEL_COLORS_LOCAL = {
+                          'Linear Regression': '#38bdf8', 'ARIMA': '#f59e0b', 'DLSTM': '#818cf8', 'XGBoost': '#4ade80'
+                        };
+                        const mc = MODEL_COLORS_LOCAL[name] || '#94a3b8';
+                        return (
+                          <tr key={i} style={{ background: rowBg, borderBottom: '1px solid rgba(255,255,255,0.04)', transition: 'background 0.2s' }}
+                            onMouseEnter={e => e.currentTarget.style.background = 'rgba(56,189,248,0.05)'}
+                            onMouseLeave={e => e.currentTarget.style.background = rowBg}
+                          >
+                            {/* Model */}
+                            <td style={{ padding: '14px 20px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <div style={{ width: 10, height: 10, borderRadius: '50%', background: mc, boxShadow: `0 0 8px ${mc}88`, flexShrink: 0 }} />
+                                <span style={{ fontWeight: 700, fontSize: '0.9rem', color: '#f0f6ff' }}>{name}</span>
+                                {isBest && <span style={{ fontSize: '0.6rem', padding: '2px 7px', background: 'rgba(74,222,128,0.15)', color: '#4ade80', borderRadius: 99, fontWeight: 700 }}>BEST</span>}
+                              </div>
+                            </td>
+                            {/* MAPE — hero */}
+                            <td style={{ padding: '14px 20px', textAlign: 'center' }}>
+                              <div style={{ display: 'inline-flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                                <span style={{
+                                  fontSize: '1rem', fontWeight: 800, color: mapeColor,
+                                  padding: '4px 12px', borderRadius: 8,
+                                  background: isBest ? 'rgba(74,222,128,0.12)' : isWorst ? 'rgba(249,115,22,0.10)' : 'rgba(148,163,184,0.08)',
+                                  border: `1px solid ${mapeColor}30`,
+                                }}>{(m.mape * 100).toFixed(4)}%</span>
+                                <div style={{ width: '100%', height: 3, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                                  <div style={{ height: '100%', width: `${(m.mape / worstMape) * 100}%`, background: `linear-gradient(90deg,${mapeColor},${mapeColor}88)`, borderRadius: 99 }} />
+                                </div>
+                              </div>
+                            </td>
+                            {/* MAE */}
+                            <td style={{ padding: '14px 20px', textAlign: 'center', color: '#94a3b8', fontWeight: 600, fontSize: '0.88rem' }}>
+                              {m.mae.toFixed(4)}
+                            </td>
+                            {/* MSE */}
+                            <td style={{ padding: '14px 20px', textAlign: 'center', color: '#94a3b8', fontWeight: 600, fontSize: '0.88rem' }}>
+                              {m.mse.toFixed(4)}
+                            </td>
+                            {/* R² */}
+                            <td style={{ padding: '14px 20px', textAlign: 'center' }}>
+                              {m.r2 !== null ? (
+                                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4 }}>
+                                  <span style={{
+                                    fontSize: '0.95rem', fontWeight: 800,
+                                    color: m.r2 > 0.90 ? '#4ade80' : m.r2 > 0.75 ? '#38bdf8' : '#94a3b8'
+                                  }}>{(m.r2 * 100).toFixed(2)}%</span>
+                                  <div style={{ width: 80, height: 4, borderRadius: 99, background: 'rgba(255,255,255,0.06)', overflow: 'hidden' }}>
+                                    <div style={{
+                                      height: '100%', width: `${m.r2 * 100}%`,
+                                      background: m.r2 > 0.90 ? 'linear-gradient(90deg,#4ade80,#059669)' :
+                                        m.r2 > 0.75 ? 'linear-gradient(90deg,#38bdf8,#0ea5e9)' :
+                                          'linear-gradient(90deg,#64748b,#475569)'
+                                    }} />
+                                  </div>
+                                </div>
+                              ) : (
+                                <span style={{ color: '#475569', fontSize: '0.82rem', fontStyle: 'italic' }}>N/A</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           </div>
         )}
 
         {/* ══════════════ DATA ANALYSIS ══════════════ */}
         {activeTab === 'data' && (
           <div className="tab-content">
-            <h2 className="section-title"><Database size={24} /> Dataset Information</h2>
-            <div className="info-grid">
-              {[
-                ['3-Year Bond Dataset', bondData3Year],
-                ['10-Year Bond Dataset', bondData10Year],
-              ].map(([title, d]) => (
-                <div key={title} className="info-card">
-                  <Clock size={20} className="info-icon" />
-                  <h3>{title}</h3>
-                  <ul className="info-list">
-                    <li>Total Data Points: <strong>{d.totalData.toLocaleString()}</strong></li>
-                    <li>Training Set: <strong>{d.trainingData.toLocaleString()} (80%)</strong></li>
-                    <li>Testing Set: <strong>{d.testingData.toLocaleString()} (20%)</strong></li>
-                    <li>Features: <strong>50 Macroeconomic Indicators</strong></li>
-                  </ul>
-                </div>
-              ))}
-            </div>
 
-            <div className="section">
-              <h3 className="subsection-title"><AlertCircle size={20} /> Key Features Used</h3>
-              <div className="features-grid">
-                {ALL_INDICATORS.map(ind => (
-                  <div key={ind.name} className="feature-tag">{ind.name}</div>
-                ))}
+            {/* ══ ABOUT THIS PROJECT ══════════════════════════════════════════ */}
+            <div style={{ marginBottom: 36 }}>
 
-              </div>
-            </div>
+              {/* Hero headline */}
+              <div style={{
+                background: 'linear-gradient(135deg,rgba(56,189,248,0.08) 0%,rgba(129,140,248,0.08) 100%)',
+                border: '1px solid rgba(56,189,248,0.15)',
+                borderRadius: 24,
+                padding: '36px 40px 32px',
+                marginBottom: 24,
+                position: 'relative',
+                overflow: 'hidden',
+              }}>
+                {/* Glow orb */}
+                <div style={{
+                  position: 'absolute', top: -60, right: -60, width: 240, height: 240,
+                  background: 'radial-gradient(circle,rgba(56,189,248,0.12),transparent 70%)', pointerEvents: 'none'
+                }} />
 
-            <div className="section">
-              <h3 className="subsection-title">Data Processing Pipeline</h3>
-              <div className="pipeline-steps">
-                {[
-                  ['Data Collection', 'Gather historical bond prices and macroeconomic indicators'],
-                  ['Data Preprocessing', 'Clean, normalize, and handle missing values'],
-                  ['Feature Engineering', 'Extract relevant features and create time-series sequences'],
-                  ['Model Training', 'Train multiple models (Linear Regression, ARIMA, DLSTM, XGBoost)'],
-                  ['Evaluation & Deployment', 'Evaluate models and deploy the best performing one'],
-                ].map(([title, desc], i) => (
-                  <div key={i} className="pipeline-step">
-                    <div className="step-number">{i + 1}</div>
-                    <div className="step-content"><h4>{title}</h4><p>{desc}</p></div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 14 }}>
+                  <span style={{ fontSize: '1.55rem' }}>📄</span>
+                  <div>
+                    <div style={{
+                      fontSize: '0.72rem', fontWeight: 700, letterSpacing: '0.12em',
+                      textTransform: 'uppercase', color: '#38bdf8', marginBottom: 3
+                    }}>
+                      IEEE Research Paper · Final Year Project
+                    </div>
+                    <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 800, color: '#f0f6ff', lineHeight: 1.25 }}>
+                      Predicting Indian G-Sec Bond Yields<br />
+                      <span style={{
+                        background: 'linear-gradient(90deg,#38bdf8,#818cf8)',
+                        WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent'
+                      }}>
+                        Using Machine Learning &amp; Deep Learning
+                      </span>
+                    </h2>
                   </div>
-                ))}
+                </div>
+
+                <p style={{ margin: '0 0 16px', fontSize: '0.92rem', color: '#94a3b8', lineHeight: 1.8, maxWidth: 780 }}>
+                  Indian Government Securities (G-Secs) are sovereign debt instruments issued by the RBI on behalf of the Government of India.
+                  Their <strong style={{ color: '#e2e8f0' }}>yields</strong> reflect the market's collective assessment of inflation, growth, liquidity,
+                  and fiscal risk — making accurate forecasting critical for institutional portfolio managers, monetary policy analysis, and
+                  financial risk management.
+                </p>
+                <p style={{ margin: 0, fontSize: '0.92rem', color: '#94a3b8', lineHeight: 1.8, maxWidth: 780 }}>
+                  This study constructs a <strong style={{ color: '#e2e8f0' }}>daily-frequency dataset spanning 2003–2024</strong> (~2,943 trading days)
+                  for both the 3-year and 10-year G-Sec benchmarks, enriched with <strong style={{ color: '#e2e8f0' }}>20 macroeconomic &amp; technical features</strong> drawn
+                  from RBI publications (monetary rates, T-bill yields, FX premia, FX reserves) and market-derived signals (SMA, Volatility, Return).
+                </p>
               </div>
+
+              {/* What we're trying to prove */}
+              <div style={{
+                background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+                border: '1px solid rgba(129,140,248,0.15)',
+                borderRadius: 20,
+                padding: '28px 32px',
+                marginBottom: 24,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <span style={{ fontSize: '1.2rem' }}>🎯</span>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#f0f6ff' }}>
+                    What This Research Sets Out to Prove
+                  </h3>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(280px,1fr))', gap: 16 }}>
+                  {[
+                    {
+                      icon: '📐', color: '#38bdf8',
+                      title: 'Classical Baselines Work Surprisingly Well',
+                      body: 'Linear Regression achieves R²=0.77 on the 10Y bond using only macro features — proving that a well-designed feature set beats model complexity for interpretability.',
+                    },
+                    {
+                      icon: '🧠', color: '#818cf8',
+                      title: 'Deep Sequence Models Capture Regime Shifts',
+                      body: 'DLSTM (2-layer, 128→64 units) exploits the temporal ordering of macro variables to outperform classical models across long forecast horizons (R²=0.89 on 10Y).',
+                    },
+                    {
+                      icon: '🌲', color: '#4ade80',
+                      title: 'XGBoost Dominates on Tabular Data',
+                      body: 'With MAPE of just 0.13% on the 10Y bond (best across all models), gradient-boosted trees prove superior at capturing non-linear interactions between macro indicators.',
+                    },
+                    {
+                      icon: '📈', color: '#f59e0b',
+                      title: 'ARIMA Struggles Without Macro Context',
+                      body: 'Pure time-series modelling (ARIMA 2,1,2) trained only on yield history collapses when macro regimes shift — negative R² in some periods proves macro features are non-optional.',
+                    },
+                  ].map(({ icon, color, title, body }) => (
+                    <div key={title} style={{
+                      background: `rgba(255,255,255,0.025)`,
+                      border: `1px solid ${color}22`,
+                      borderRadius: 14, padding: '18px 20px',
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 10 }}>
+                        <span style={{ fontSize: '1.15rem' }}>{icon}</span>
+                        <span style={{ fontSize: '0.82rem', fontWeight: 700, color }}>{title}</span>
+                      </div>
+                      <p style={{ margin: 0, fontSize: '0.8rem', color: '#94a3b8', lineHeight: 1.75 }}>{body}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Web Project Architecture */}
+              <div style={{
+                background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+                border: '1px solid rgba(74,222,128,0.12)',
+                borderRadius: 20,
+                padding: '28px 32px',
+                marginBottom: 24,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+                  <span style={{ fontSize: '1.2rem' }}>🏗️</span>
+                  <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#f0f6ff' }}>
+                    Web Application Architecture
+                  </h3>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 20 }}>
+
+                  {/* Frontend */}
+                  <div style={{ background: 'rgba(56,189,248,0.04)', border: '1px solid rgba(56,189,248,0.15)', borderRadius: 16, padding: '20px 22px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
+                      <span style={{ fontSize: '1.1rem' }}>🖥️</span>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#38bdf8', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Frontend</div>
+                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f0f6ff' }}>React 19 + Vite + Recharts</div>
+                      </div>
+                    </div>
+                    {[
+                      ['Overview Tab', 'Live bond price stat cards, macroeconomic KPIs, and expandable indicator library with per-indicator yield impact modals'],
+                      ['Predictions Tab', 'On-demand model inference — select bond (3Y/10Y) + model, fire POST /api/compute, render Actual vs Predicted line chart with 60-pt sequence context'],
+                      ['Models Tab', 'Premium dual-metric bar chart (MAPE + R²) with custom hover tooltips; color-coded performance table with MAPE as the primary metric'],
+                      ['Data Analysis Tab', 'Research context, web architecture overview, dataset cards, feature grid, and data processing pipeline'],
+                    ].map(([tab, desc]) => (
+                      <div key={tab} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#38bdf8', marginBottom: 3 }}>→ {tab}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.65 }}>{desc}</div>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {['React 19', 'Vite', 'Recharts', 'Lucide Icons', 'Render (Static)'].map(t => (
+                        <span key={t} style={{ fontSize: '0.65rem', padding: '3px 8px', background: 'rgba(56,189,248,0.10)', color: '#38bdf8', borderRadius: 6, fontWeight: 600 }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Backend */}
+                  <div style={{ background: 'rgba(74,222,128,0.04)', border: '1px solid rgba(74,222,128,0.15)', borderRadius: 16, padding: '20px 22px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 14 }}>
+                      <span style={{ fontSize: '1.1rem' }}>⚙️</span>
+                      <div>
+                        <div style={{ fontSize: '0.65rem', color: '#4ade80', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>Backend</div>
+                        <div style={{ fontSize: '0.92rem', fontWeight: 700, color: '#f0f6ff' }}>Python Flask + TensorFlow + scikit-learn</div>
+                      </div>
+                    </div>
+                    {[
+                      ['POST /api/compute', 'Accepts { model, bond_type }. Trains (or loads cached) the selected model on the dataset, runs inference on the test split, and returns metrics + chart_data arrays'],
+                      ['Model Registry', '4 model handlers: linear_regression (OLS), arima (2,1,2), lstm (2-layer DLSTM, seq=60), xgboost (n_estimators=200, max_depth=6)'],
+                      ['Feature Pipeline', 'Reads p_merged_data CSV → Z-score normalisation → 80/20 split → sequence generation (DLSTM only) → model fit → predictions de-normalised back to yield %'],
+                      ['Deployment', 'Hosted on Render (https://g-sec-svc.onrender.com) with venv + requirements.txt; Python 3.12.6 pinned via .python-version'],
+                    ].map(([tab, desc]) => (
+                      <div key={tab} style={{ marginBottom: 10, paddingBottom: 10, borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#4ade80', marginBottom: 3 }}>→ {tab}</div>
+                        <div style={{ fontSize: '0.75rem', color: '#94a3b8', lineHeight: 1.65 }}>{desc}</div>
+                      </div>
+                    ))}
+                    <div style={{ marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {['Flask', 'TensorFlow', 'scikit-learn', 'statsmodels', 'XGBoost', 'Render (Web SVC)'].map(t => (
+                        <span key={t} style={{ fontSize: '0.65rem', padding: '3px 8px', background: 'rgba(74,222,128,0.10)', color: '#4ade80', borderRadius: 6, fontWeight: 600 }}>{t}</span>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* API flow diagram */}
+                <div style={{ marginTop: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 0, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'User selects\nModel + Bond', icon: '👤', color: '#38bdf8' },
+                    { arrow: true },
+                    { label: 'React fires\nPOST /api/compute', icon: '⚛️', color: '#818cf8' },
+                    { arrow: true },
+                    { label: 'Flask trains\n& runs model', icon: '🐍', color: '#4ade80' },
+                    { arrow: true },
+                    { label: 'Returns metrics\n+ chart arrays', icon: '📊', color: '#f59e0b' },
+                    { arrow: true },
+                    { label: 'Recharts renders\nActual vs Predicted', icon: '📈', color: '#f472b6' },
+                  ].map((step, i) =>
+                    step.arrow ? (
+                      <div key={i} style={{ padding: '0 6px', color: '#334155', fontSize: '1.2rem' }}>→</div>
+                    ) : (
+                      <div key={i} style={{
+                        background: 'rgba(255,255,255,0.03)', border: `1px solid ${step.color}22`,
+                        borderRadius: 12, padding: '12px 14px', textAlign: 'center', minWidth: 100,
+                      }}>
+                        <div style={{ fontSize: '1.4rem', marginBottom: 4 }}>{step.icon}</div>
+                        <div style={{ fontSize: '0.65rem', color: step.color, fontWeight: 700, whiteSpace: 'pre-line', lineHeight: 1.5 }}>{step.label}</div>
+                      </div>
+                    )
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ══ PDF RESEARCH PAPER CARD ══ */}
+            <div style={{ marginBottom: 28 }}>
+              {/* Section label */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+                <span style={{ fontSize: '1.2rem' }}>📄</span>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#f0f6ff' }}>IEEE Research Paper</h3>
+                <span style={{ fontSize: '0.65rem', padding: '3px 10px', background: 'rgba(56,189,248,0.12)', color: '#38bdf8', borderRadius: 99, fontWeight: 700, border: '1px solid rgba(56,189,248,0.25)' }}>PDF</span>
+              </div>
+
+              {/* Clickable card */}
+              <div
+                onClick={() => window.open('/research-paper.pdf', '_blank')}
+                style={{
+                  cursor: 'pointer',
+                  background: 'linear-gradient(135deg,rgba(56,189,248,0.06) 0%,rgba(129,140,248,0.06) 100%)',
+                  border: '1px solid rgba(56,189,248,0.18)',
+                  borderRadius: 20,
+                  padding: '32px 36px',
+                  display: 'flex', alignItems: 'center', gap: 32,
+                  position: 'relative', overflow: 'hidden',
+                  transition: 'all 0.3s cubic-bezier(0.4,0,0.2,1)',
+                }}
+                onMouseEnter={e => {
+                  e.currentTarget.style.border = '1px solid rgba(56,189,248,0.45)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg,rgba(56,189,248,0.10) 0%,rgba(129,140,248,0.10) 100%)';
+                  e.currentTarget.style.transform = 'translateY(-2px)';
+                  e.currentTarget.style.boxShadow = '0 20px 60px rgba(56,189,248,0.12)';
+                }}
+                onMouseLeave={e => {
+                  e.currentTarget.style.border = '1px solid rgba(56,189,248,0.18)';
+                  e.currentTarget.style.background = 'linear-gradient(135deg,rgba(56,189,248,0.06) 0%,rgba(129,140,248,0.06) 100%)';
+                  e.currentTarget.style.transform = 'translateY(0)';
+                  e.currentTarget.style.boxShadow = 'none';
+                }}
+              >
+                {/* Glow orb */}
+                <div style={{
+                  position: 'absolute', top: -40, right: -40, width: 180, height: 180,
+                  background: 'radial-gradient(circle,rgba(56,189,248,0.10),transparent 70%)', pointerEvents: 'none'
+                }} />
+
+                {/* PDF Icon */}
+                <div style={{
+                  flexShrink: 0, width: 72, height: 88,
+                  background: 'linear-gradient(160deg,#1e3a5f,#0f2040)',
+                  border: '1px solid rgba(56,189,248,0.25)',
+                  borderRadius: 12,
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+                  gap: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.4)',
+                }}>
+                  <span style={{ fontSize: '2rem' }}>📄</span>
+                  <span style={{
+                    fontSize: '0.55rem', fontWeight: 800, letterSpacing: '0.08em', color: '#f87171',
+                    background: 'rgba(248,113,113,0.15)', border: '1px solid rgba(248,113,113,0.3)',
+                    borderRadius: 4, padding: '2px 6px'
+                  }}>PDF</span>
+                </div>
+
+                {/* Meta */}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: '0.68rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em',
+                    color: '#38bdf8', marginBottom: 8
+                  }}>IEEE Conference Paper · Final Year Project 2025–26</div>
+                  <h3 style={{ margin: '0 0 10px', fontSize: '1.25rem', fontWeight: 800, color: '#f0f6ff', lineHeight: 1.3 }}>
+                    Predicting Indian G-Sec Bond Yields Using Machine Learning &amp; Deep Learning
+                  </h3>
+                  <p style={{ margin: '0 0 16px', fontSize: '0.82rem', color: '#64748b', lineHeight: 1.65 }}>
+                    Comparative study of Linear Regression, ARIMA, DLSTM, and XGBoost on 20+ macroeconomic &amp; technical features
+                    over a daily dataset spanning 2003–2024. XGBoost achieves MAPE of <strong style={{ color: '#4ade80' }}>0.13%</strong> on the 10-year bond.
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                    {['Linear Regression', 'ARIMA', 'DLSTM', 'XGBoost', 'G-Sec Yield Forecasting', 'RBI Macro Features'].map(tag => (
+                      <span key={tag} style={{
+                        fontSize: '0.62rem', padding: '3px 9px',
+                        background: 'rgba(255,255,255,0.04)', color: '#94a3b8',
+                        border: '1px solid rgba(255,255,255,0.07)', borderRadius: 99, fontWeight: 600
+                      }}>{tag}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* CTA */}
+                <div style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+                  <div style={{
+                    width: 52, height: 52, borderRadius: '50%',
+                    background: 'linear-gradient(135deg,#38bdf8,#818cf8)',
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    boxShadow: '0 0 24px rgba(56,189,248,0.35)',
+                  }}>
+                    <span style={{ fontSize: '1.3rem' }}>↗</span>
+                  </div>
+                  <span style={{ fontSize: '0.65rem', color: '#64748b', fontWeight: 600 }}>Click to open</span>
+                </div>
+              </div>
+            </div>
+
+            {/* ══ FEATURE DEEP DIVE ══ */}
+            <div style={{
+              background: 'linear-gradient(160deg,#0c1a2e,#0b1424)',
+              border: '1px solid rgba(56,189,248,0.10)',
+              borderRadius: 20,
+              padding: '28px 32px',
+              marginTop: 24,
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+                <span style={{ fontSize: '1.2rem' }}>🔬</span>
+                <h3 style={{ margin: 0, fontSize: '1.05rem', fontWeight: 700, color: '#f0f6ff' }}>Feature Deep Dive</h3>
+              </div>
+              <p style={{ margin: '0 0 22px', fontSize: '0.82rem', color: '#64748b', lineHeight: 1.6 }}>
+                All 20 features used across models, grouped by category. Yield impact shows whether a rise in that indicator historically <span style={{ color: '#f87171' }}>raises ↑</span>, <span style={{ color: '#4ade80' }}>lowers ↓</span>, or has a <span style={{ color: '#fbbf24' }}>mixed ↕</span> effect on G-Sec yields.
+              </p>
+              {(() => {
+                const CAT_META = {
+                  'Market Action': { color: '#38bdf8', icon: '📊', desc: 'Price-derived signals computed from the bond yield series itself' },
+                  'Liquidity': { color: '#4ade80', icon: '🏦', desc: 'RBI monetary policy rates that anchor the yield curve corridor' },
+                  'Micro': { color: '#818cf8', icon: '📋', desc: 'Short-term T-bill yields forming the risk-free rate curve' },
+                  'Macro': { color: '#f59e0b', icon: '🌐', desc: 'USD/INR forward premia and FX reserves reflecting currency market pressure' },
+                };
+                const impactStyle = (impact) => ({
+                  fontSize: '0.62rem', fontWeight: 700, padding: '2px 8px', borderRadius: 99,
+                  color: impact === '↑' ? '#f87171' : impact === '↓' ? '#4ade80' : '#fbbf24',
+                  background: impact === '↑' ? 'rgba(248,113,113,0.12)' : impact === '↓' ? 'rgba(74,222,128,0.10)' : 'rgba(251,191,36,0.10)',
+                  border: impact === '↑' ? '1px solid rgba(248,113,113,0.2)' : impact === '↓' ? '1px solid rgba(74,222,128,0.18)' : '1px solid rgba(251,191,36,0.18)',
+                });
+                const impactLabel = (impact) => impact === '↑' ? '↑ Raises yield' : impact === '↓' ? '↓ Lowers yield' : '↕ Mixed';
+
+                const grouped = {};
+                ALL_INDICATORS.forEach(ind => {
+                  if (!grouped[ind.cat]) grouped[ind.cat] = [];
+                  grouped[ind.cat].push(ind);
+                });
+                return Object.entries(grouped).map(([cat, inds]) => {
+                  const meta = CAT_META[cat] || { color: '#94a3b8', icon: '📌', desc: '' };
+                  return (
+                    <div key={cat} style={{ marginBottom: 24 }}>
+                      {/* Category header */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                        <span style={{ fontSize: '1rem' }}>{meta.icon}</span>
+                        <div>
+                          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: meta.color }}>{cat}</span>
+                          <span style={{ fontSize: '0.72rem', color: '#475569', marginLeft: 10 }}>{meta.desc}</span>
+                        </div>
+                      </div>
+                      {/* Feature rows */}
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(260px,1fr))', gap: 8 }}>
+                        {inds.map(ind => (
+                          <div key={ind.name} style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            background: 'rgba(255,255,255,0.03)',
+                            border: `1px solid ${meta.color}18`,
+                            borderRadius: 10, padding: '10px 14px',
+                          }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 9, minWidth: 0 }}>
+                              <div style={{ width: 8, height: 8, borderRadius: '50%', background: ind.color || meta.color, flexShrink: 0 }} />
+                              <div>
+                                <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#e2e8f0', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 160 }}>{ind.name}</div>
+                                <div style={{ fontSize: '0.65rem', color: '#475569', fontWeight: 600 }}>{ind.short}</div>
+                              </div>
+                            </div>
+                            <span style={impactStyle(ind.impact)}>{impactLabel(ind.impact)}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
             </div>
           </div>
         )}
