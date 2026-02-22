@@ -2,8 +2,11 @@ services:
   - type: web
     name: bond-market-prediction
     env: static
-    buildCommand: cd my-react-app && npm install && npm run build
+    buildCommand: cd my-react-app && npm install && VITE_API_URL=https://g-sec-svc.onrender.com/api npm run build
     staticPublishPath: my-react-app/dist
+    envVars:
+      - key: VITE_API_URL
+        value: https://g-sec-svc.onrender.com/api
     headers:
       - path: /*
         name: Cache-Control
