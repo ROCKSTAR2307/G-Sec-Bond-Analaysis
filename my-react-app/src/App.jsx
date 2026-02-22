@@ -1183,6 +1183,7 @@ function UserPredictionTab({ onTrainingChange }) {
               value={bondType}
               onChange={(e) => {
                 closePredictionSmooth();
+                setSelectedDate('');
                 setBondType(e.target.value);
               }}
             >
