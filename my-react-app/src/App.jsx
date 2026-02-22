@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   LineChart, Line,
   BarChart, Bar,
@@ -702,15 +702,9 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
     setError(null);
     setMetrics(null);
     setComputed(false);
-    onTrainingChange?.(modelName);          // ← tell header we're training
-    const startTime = Date.now();
+    onTrainingChange?.(modelName, true);
     try {
       const result = await bondAPI.compute(bondType, modelName);
-
-      // Ensure spinner is visible for at least 800ms
-      const elapsed = Date.now() - startTime;
-      if (elapsed < 800) await new Promise(r => setTimeout(r, 800 - elapsed));
-
       const formatted = result.chart_data.dates.map((dateStr, i) => {
         const d = new Date(dateStr);
         const label = d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
@@ -728,7 +722,7 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
       setError(err.message);
     } finally {
       setIsLoading(false);
-      onTrainingChange?.(null);             // ← training done, back to idle
+      onTrainingChange?.(modelName, false);
     }
   };
 
@@ -836,6 +830,23 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
         }}>
           <ResponsiveContainer width="100%" height={300}>
             <LineChart data={chartData} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+              {/* Glow filters */}
+              <defs>
+                <filter id={`glow-actual-${modelName}`} x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="3" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+                <filter id={`glow-pred-${modelName}`} x="-20%" y="-20%" width="140%" height="140%">
+                  <feGaussianBlur stdDeviation="4" result="blur" />
+                  <feMerge>
+                    <feMergeNode in="blur" />
+                    <feMergeNode in="SourceGraphic" />
+                  </feMerge>
+                </filter>
+              </defs>
               <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
               <XAxis
                 dataKey="date"
@@ -858,7 +869,13 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
                 width={52}
               />
               <Tooltip
-                cursor={{ stroke: 'rgba(148,163,184,0.15)', strokeWidth: 1, strokeDasharray: '4 3' }}
+                offset={40}
+                cursor={{
+                  stroke: accentColor,
+                  strokeWidth: 2,
+                  strokeOpacity: 0.8,
+                  filter: `drop-shadow(0 0 6px ${accentColor})`,
+                }}
                 content={({ active, payload, label }) => {
                   if (!active || !payload?.length) return null;
                   const d = payload[0]?.payload || {};
@@ -924,26 +941,26 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
                   }}>{value}</span>
                 )}
               />
-              {/* Actual — near-white, solid */}
+              {/* Actual — near-white, solid, glowing */}
               <Line
                 type="monotone" dataKey="Actual" name="Actual"
                 stroke={ACTUAL_LINE_COLOR} strokeWidth={1.5}
                 dot={false}
+                filter={`url(#glow-actual-${modelName})`}
                 activeDot={{
                   r: 6, fill: ACTUAL_LINE_COLOR, strokeWidth: 2.5,
                   stroke: 'rgba(255,255,255,0.25)',
-                  filter: 'drop-shadow(0 0 6px rgba(255,255,255,0.6))',
                 }}
               />
-              {/* Predicted — model accent, dashed */}
+              {/* Predicted — model accent, dashed, glowing */}
               <Line
                 type="monotone" dataKey="Predicted" name="Predicted"
                 stroke={accentColor} strokeWidth={1.5} strokeDasharray="6 3"
                 dot={false}
+                filter={`url(#glow-pred-${modelName})`}
                 activeDot={{
                   r: 6, fill: accentColor, strokeWidth: 2.5,
                   stroke: `${accentColor}44`,
-                  filter: `drop-shadow(0 0 8px ${accentColor})`,
                 }}
               />
             </LineChart>
@@ -975,7 +992,7 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
           color: '#94a3b8', marginBottom: '1.5rem', gap: '10px',
         }}>
           <span style={{ fontSize: '1.75rem', display: 'inline-block', animation: 'spin 0.8s linear infinite', color: accentColor }}>⟳</span>
-          <span>Training <strong style={{ color: accentColor }}>{modelName}</strong> on {bondType} data…</span>
+          <span>Computing <strong style={{ color: accentColor }}>{modelName}</strong> on {bondType} data…</span>
           {modelName === 'DLSTM' && <span style={{ fontSize: '0.75rem', color: '#64748b' }}>Deep LSTM may take 30–60 s</span>}
         </div>
       )}
@@ -1002,6 +1019,289 @@ function ModelPredictionCard({ modelName, onTrainingChange }) {
           ))}
         </div>
       )}
+    </div>
+  );
+}
+
+function UserPredictionTab({ onTrainingChange }) {
+  const [bondType, setBondType] = useState('3-year');
+  const [modelName, setModelName] = useState('XGBoost');
+  const [dateRange, setDateRange] = useState({ min_date: '', max_date: '', dates: [] });
+  const [selectedDate, setSelectedDate] = useState('');
+  const [features, setFeatures] = useState({});
+  const [actualValue, setActualValue] = useState(null);
+  const [prediction, setPrediction] = useState(null);
+  const [loadingRange, setLoadingRange] = useState(false);
+  const [loadingFeatures, setLoadingFeatures] = useState(false);
+  const [loadingPrediction, setLoadingPrediction] = useState(false);
+  const [isClosingPrediction, setIsClosingPrediction] = useState(false);
+  const [error, setError] = useState(null);
+  const closeTimerRef = useRef(null);
+
+  const closePredictionSmooth = () => {
+    if (!prediction || isClosingPrediction) return;
+    setIsClosingPrediction(true);
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => {
+      setPrediction(null);
+      setPredictionFilters(null);
+      setIsClosingPrediction(false);
+      closeTimerRef.current = null;
+    }, 220);
+  };
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadDateRange = async () => {
+      setLoadingRange(true);
+      setError(null);
+      try {
+        const range = await bondAPI.getDateRange(bondType);
+        if (!isMounted) return;
+        const nextDate = (range.dates || [])[0] || '';
+        setDateRange(range);
+        setSelectedDate((prev) => ((range.dates || []).includes(prev) ? prev : nextDate));
+      } catch (err) {
+        if (!isMounted) return;
+        setError(err.message);
+      } finally {
+        if (isMounted) setLoadingRange(false);
+      }
+    };
+    loadDateRange();
+    return () => { isMounted = false; };
+  }, [bondType]);
+
+  useEffect(() => {
+    const dates = dateRange.dates || [];
+    if (!dates.length) {
+      return;
+    }
+    if (!dates.includes(selectedDate)) {
+      setSelectedDate(dates[0]);
+    }
+  }, [dateRange, selectedDate]);
+
+  useEffect(() => {
+    let isMounted = true;
+    const loadFeatures = async () => {
+      if (!selectedDate) return;
+      setLoadingFeatures(true);
+      try {
+        const data = await bondAPI.getFeatures(selectedDate, bondType);
+        if (!isMounted) return;
+        if (data.date && data.date !== selectedDate) {
+          setSelectedDate(data.date);
+        }
+        setFeatures(data.features || {});
+        setActualValue(data.actual);
+      } catch (err) {
+        if (!isMounted) return;
+        setError(err.message);
+      } finally {
+        if (isMounted) setLoadingFeatures(false);
+      }
+    };
+    loadFeatures();
+    return () => { isMounted = false; };
+  }, [selectedDate, bondType]);
+
+  useEffect(() => () => {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+  }, []);
+
+  const handleDateChange = (value) => {
+    if (!value) {
+      setSelectedDate('');
+      return;
+    }
+    const min = dateRange.min_date || '';
+    const max = dateRange.max_date || '';
+    if ((min && value < min) || (max && value > max)) {
+      return;
+    }
+    if (value !== selectedDate) closePredictionSmooth();
+    setSelectedDate(value);
+  };
+
+  const handlePredict = async () => {
+    if (!selectedDate) return;
+    setLoadingPrediction(true);
+    setError(null);
+    onTrainingChange?.(modelName, true);
+    const startTime = Date.now();
+    try {
+      const result = await bondAPI.predictSingle(selectedDate, bondType, modelName);
+      const hasAllMetrics =
+        result?.metrics &&
+        ['mape', 'mae', 'mse', 'r2'].every((k) => result.metrics[k] !== null && result.metrics[k] !== undefined);
+
+      let merged = result;
+      if (!hasAllMetrics) {
+        const computeResult = await bondAPI.compute(bondType, modelName);
+        merged = {
+          ...result,
+          metrics: computeResult?.metrics || null,
+        };
+      }
+
+      if (closeTimerRef.current) {
+        clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+      setIsClosingPrediction(false);
+      setPrediction(merged);
+      if (merged?.date) setSelectedDate(merged.date);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      const elapsed = Date.now() - startTime;
+      const minBuffer = 3000;
+      if (elapsed < minBuffer) {
+        await new Promise((resolve) => setTimeout(resolve, minBuffer - elapsed));
+      }
+      setLoadingPrediction(false);
+      onTrainingChange?.(modelName, false);
+    }
+  };
+
+  return (
+    <div className="tab-content">
+      <div className="section-header">
+        <h2>User Prediction</h2>
+      </div>
+      <p style={{ color: '#64748b', marginBottom: '1.2rem', fontSize: '0.9rem' }}>
+        Select bond, model, and date. Macro indicators are auto-filled from test data and a single-date prediction is returned.
+      </p>
+
+      <div className="section user-prediction-panel">
+        <div className="user-prediction-form-grid">
+          <div>
+            <label className="up-label">Bond Type</label>
+            <select
+              className="model-select up-select"
+              value={bondType}
+              onChange={(e) => {
+                closePredictionSmooth();
+                setBondType(e.target.value);
+              }}
+            >
+              <option value="3-year">3-Year</option>
+              <option value="10-year">10-Year</option>
+            </select>
+          </div>
+          <div>
+            <label className="up-label">Model</label>
+            <select
+              className="model-select up-select"
+              value={modelName}
+              onChange={(e) => {
+                closePredictionSmooth();
+                setModelName(e.target.value);
+              }}
+            >
+              {Object.keys(modelMetrics).map((name) => (
+                <option value={name} key={name}>{name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="up-label">Date (test range)</label>
+            <input
+              className="model-select up-select"
+              type="date"
+              value={selectedDate}
+              min={dateRange.min_date || undefined}
+              max={dateRange.max_date || undefined}
+              onChange={(e) => handleDateChange(e.target.value)}
+            />
+          </div>
+          <button
+            className="up-predict-btn"
+            onClick={handlePredict}
+            disabled={!selectedDate || loadingPrediction}
+          >
+            {loadingPrediction ? (
+              <>
+                <span className="up-btn-spinner" />
+                Predicting...
+              </>
+            ) : 'Predict'}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div style={{
+          color: '#fca5a5', background: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.25)',
+          borderRadius: '8px', padding: '0.75rem 1rem', marginBottom: '1rem', fontSize: '0.85rem',
+        }}>
+          {error}
+        </div>
+      )}
+
+      <div className={`up-loading-line ${(loadingRange || loadingFeatures) ? 'active' : ''}`}>
+        Loading test dates and macro indicators...
+      </div>
+
+      {prediction && (
+        <div className={`section up-result-anim ${isClosingPrediction ? 'up-result-closing' : ''}`}>
+          <h3 className="section-title"><Target size={18} /> Prediction Result</h3>
+          <div className="metrics-grid">
+            {[
+              ['MAPE', prediction.metrics?.mape, 4, 'up-metric-mape'],
+              ['MAE', prediction.metrics?.mae, 4, 'up-metric-mae'],
+              ['MSE', prediction.metrics?.mse, 4, 'up-metric-mse'],
+              ['R²', prediction.metrics?.r2, 4, 'up-metric-r2'],
+            ].map(([label, value, digits, cls]) => (
+              <div key={label} className={`metric-card up-result-card up-metric-card ${cls}`}>
+                <div className="metric-label">{label}</div>
+                <div className="up-result-value">
+                  {value !== null && value !== undefined ? Number(value).toFixed(digits) : 'N/A'}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="metrics-grid" style={{ marginTop: '1rem' }}>
+            {[
+              ['Date', prediction.date],
+              ['Predicted', Number(prediction.predicted).toFixed(5)],
+              ['Actual', Number(prediction.actual).toFixed(5)],
+              ['Abs Error', Number(prediction.error).toFixed(5)],
+              ['% Error', `${Number(prediction.pct_error).toFixed(3)}%`],
+            ].map(([label, value]) => (
+              <div key={label} className="metric-card up-result-card">
+                <div className="metric-label">{label}</div>
+                <div className="up-result-value">{value}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="section">
+        <h3 className="section-title"><Database size={18} /> Auto-Filled Macro Indicators</h3>
+        <div className="stats-grid up-features-grid">
+          {Object.keys(features).length === 0 ? (
+            <div style={{ color: '#64748b', fontSize: '0.85rem' }}>
+              Select a date to load macro indicators.
+            </div>
+          ) : (
+            Object.entries(features).map(([key, val]) => (
+              <div key={key} className="stat-card up-feature-card">
+                <label className="up-feature-label">{key}</label>
+                <input className="model-select up-feature-input" value={Number(val).toFixed(6)} readOnly />
+              </div>
+            ))
+          )}
+        </div>
+        {actualValue !== null && (
+          <div style={{ marginTop: '0.75rem', color: '#94a3b8', fontSize: '0.8rem' }}>
+            Dataset actual value for selected date: <strong style={{ color: '#e2e8f0' }}>{Number(actualValue).toFixed(6)}</strong>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -1100,7 +1400,7 @@ function App() {
                       animation: 'spin 0.7s linear infinite',
                       flexShrink: 0,
                     }} />
-                    {name}
+                    Training {name} model
                   </div>
                 ))
               )}
@@ -1125,6 +1425,13 @@ function App() {
             <Icon size={18} /> {label}
           </button>
         ))}
+        <button
+          className={`nav-tab ${activeTab === 'userPrediction' ? 'active' : ''}`}
+          style={{ marginLeft: 'auto' }}
+          onClick={() => { setActiveTab('userPrediction'); setTrainingModels(new Set()); }}
+        >
+          <Clock size={18} /> User Prediction
+        </button>
       </nav>
 
       <div className="main-content">
@@ -1225,6 +1532,10 @@ function App() {
               <ModelPredictionCard key={name} modelName={name} onTrainingChange={handleTrainingChange} />
             ))}
           </div>
+        )}
+
+        {activeTab === 'userPrediction' && (
+          <UserPredictionTab onTrainingChange={handleTrainingChange} />
         )}
 
         {/* ══════════════ MODELS ══════════════ */}
