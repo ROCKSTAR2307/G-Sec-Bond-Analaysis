@@ -376,7 +376,7 @@ const MODEL_INFO = {
     params: [['Features', '50 macro indicators'], ['Method', 'Ordinary Least Squares'], ['Scaling', 'Z-score normalisation'], ['Train split', '80% (2,354 points)']],
     project: 'Used as the interpretability benchmark. Each coefficient tells exactly which macro variable pushes bond yields — CPI and Repo Rate have the highest β weights. Achieves R² = 0.77 on the 10-year bond despite being a linear model.',
     Diagram: ({ color }) => (
-      <svg viewBox="0 0 420 160" style={{ width: '100%', maxWidth: 420 }}>
+      <svg viewBox="0 0 420 160" style={{ width: '100%', maxWidth: 700 }}>
         <defs>
           <marker id="arr-lr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill={color} opacity="0.7" />
@@ -414,7 +414,7 @@ const MODEL_INFO = {
     params: [['Order (3Y)', 'ARIMA(2,1,2)'], ['Order (10Y)', 'ARIMA(1,1,1)'], ['Stationarity', 'ADF-tested, d=1'], ['Scope', 'Univariate (yield only)']],
     project: 'Fits purely on the historical bond yield series — no macro features. Differencing (d=1) removes the unit root to achieve stationarity. The AR(p) terms model yield momentum, MA(q) terms model shock recovery. Best at capturing mean-reversion in stable regimes.',
     Diagram: ({ color }) => (
-      <svg viewBox="0 0 440 140" style={{ width: '100%', maxWidth: 440 }}>
+      <svg viewBox="0 0 440 140" style={{ width: '100%', maxWidth: 700 }}>
         <defs>
           <marker id="arr-ar" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill={color} opacity="0.7" />
@@ -441,7 +441,7 @@ const MODEL_INFO = {
     params: [['Seq length', '60 trading days'], ['Architecture', 'LSTM(128) → LSTM(64) → Dense(1)'], ['Optimiser', 'Adam (lr=0.001)'], ['Epochs', '200, batch=32, dropout=0.2']],
     project: 'Takes the last 60 days of 50 macro features as a 3D sequence (60×50). Two stacked LSTM layers capture short-term momentum and long-term macro regime. Dropout(0.2) prevents overfitting. Achieves best 10Y accuracy with R²=0.89.',
     Diagram: ({ color }) => (
-      <svg viewBox="0 0 440 160" style={{ width: '100%', maxWidth: 440 }}>
+      <svg viewBox="0 0 440 160" style={{ width: '100%', maxWidth: 700 }}>
         <defs>
           <marker id="arr-lstm" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill={color} opacity="0.7" />
@@ -492,7 +492,7 @@ const MODEL_INFO = {
     params: [['Trees', '200 estimators'], ['Max depth', '6'], ['Learning rate', '0.1'], ['Subsample', '0.8, colsample=0.8']],
     project: 'Sequentially builds 200 shallow trees where each corrects the residual error of the previous ensemble. XGBoost uses second-order gradient statistics for fast convergence. Top SHAP features: Crude Oil, FII Flows, CPI. Achieves R²=0.99 on both 3Y and 10Y bonds — the best model in this study.',
     Diagram: ({ color }) => (
-      <svg viewBox="0 0 440 150" style={{ width: '100%', maxWidth: 440 }}>
+      <svg viewBox="0 0 440 150" style={{ width: '100%', maxWidth: 700 }}>
         <defs>
           <marker id="arr-xgb" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
             <path d="M0,0 L0,6 L8,3 z" fill={color} opacity="0.7" />
@@ -554,9 +554,9 @@ function ModelExplainerModal({ modelName, onClose }) {
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          width: '100%', maxWidth: '600px',
+          width: '100%', maxWidth: '850px',
           background: 'linear-gradient(160deg, #0c1a2e 0%, #0b1424 50%, #0f172a 100%)',
-          borderRadius: '20px',
+          borderRadius: '24px',
           overflow: 'hidden',
           boxShadow: `0 0 0 1px ${color}33, 0 40px 100px rgba(0,0,0,0.8), 0 0 100px ${color}14`,
           animation: 'modalZoomIn 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both',
@@ -569,21 +569,21 @@ function ModelExplainerModal({ modelName, onClose }) {
 
         {/* Header */}
         <div style={{
-          padding: '22px 24px 16px',
+          padding: '28px 32px 20px',
           background: `linear-gradient(135deg, ${color}0d, transparent)`,
           borderBottom: `1px solid ${color}20`,
           display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
         }}>
           <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '6px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '8px' }}>
               <div style={{
-                padding: '4px 10px', borderRadius: '100px', fontSize: '0.65rem',
+                padding: '5px 12px', borderRadius: '100px', fontSize: '0.75rem',
                 fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
                 background: `${color}20`, border: `1px solid ${color}44`, color,
               }}>{info.type}</div>
             </div>
-            <h2 style={{ margin: 0, fontSize: '1.45rem', fontWeight: 800, color: '#f1f5f9' }}>{modelName}</h2>
-            <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: '#64748b', fontStyle: 'italic' }}>{info.tagline}</p>
+            <h2 style={{ margin: 0, fontSize: '1.8rem', fontWeight: 800, color: '#f1f5f9' }}>{modelName}</h2>
+            <p style={{ margin: '6px 0 0', fontSize: '0.95rem', color: '#64748b', fontStyle: 'italic' }}>{info.tagline}</p>
           </div>
           <button onClick={onClose} style={{
             width: '32px', height: '32px', borderRadius: '50%', flexShrink: 0,
@@ -597,40 +597,42 @@ function ModelExplainerModal({ modelName, onClose }) {
         </div>
 
         {/* SVG Diagram */}
-        <div style={{ padding: '20px 24px', borderBottom: `1px solid ${color}14` }}>
-          <div style={{ fontSize: '0.72rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '14px' }}>
+        <div style={{ padding: '24px 32px', borderBottom: `1px solid ${color}14` }}>
+          <div style={{ fontSize: '0.8rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '16px' }}>
             Architecture Diagram
           </div>
           <div style={{
-            background: `${color}07`, borderRadius: '12px',
-            border: `1px solid ${color}15`, padding: '16px',
+            background: `${color}07`, borderRadius: '16px',
+            border: `1px solid ${color}15`, padding: '24px',
+            display: 'flex', justifyContent: 'center',
           }}>
             <Diagram color={color} />
           </div>
         </div>
 
         {/* How it's used + params side by side */}
-        <div style={{ padding: '20px 24px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px' }}>
+        <div style={{ padding: '24px 32px 32px', display: 'grid', gridTemplateColumns: '1.2fr 1fr', gap: '30px' }}>
           {/* In this project */}
           <div>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '10px' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px' }}>
               In This Project
             </div>
-            <p style={{ margin: 0, fontSize: '0.82rem', color: '#94a3b8', lineHeight: 1.7 }}>{info.project}</p>
+            <p style={{ margin: 0, fontSize: '0.95rem', color: '#94a3b8', lineHeight: 1.75 }}>{info.project}</p>
           </div>
           {/* Hyperparameters */}
           <div>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '10px' }}>
+            <div style={{ fontSize: '0.8rem', fontWeight: 700, color, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: '12px' }}>
               Key Parameters
             </div>
-            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 4px' }}>
+            <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0 6px' }}>
               <tbody>
                 {info.params.map(([k, v]) => (
                   <tr key={k}>
-                    <td style={{ padding: '4px 10px 4px 0', fontSize: '0.75rem', color: '#64748b', whiteSpace: 'nowrap' }}>{k}</td>
+                    <td style={{ padding: '6px 14px 6px 0', fontSize: '0.85rem', color: '#64748b', whiteSpace: 'nowrap' }}>{k}</td>
                     <td style={{
-                      padding: '4px 10px', fontSize: '0.75rem', fontWeight: 600,
-                      color: '#e2e8f0', background: `${color}10`, borderRadius: '6px',
+                      padding: '6px 14px', fontSize: '0.85rem', fontWeight: 600,
+                      color: '#e2e8f0', background: `${color}10`, borderRadius: '8px',
+                      boxShadow: `inset 0 0 0 1px ${color}15`,
                     }}>{v}</td>
                   </tr>
                 ))}
